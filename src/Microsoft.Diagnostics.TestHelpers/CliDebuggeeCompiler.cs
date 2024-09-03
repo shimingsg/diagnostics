@@ -1,8 +1,8 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 
 namespace Microsoft.Diagnostics.TestHelpers
@@ -14,34 +14,41 @@ namespace Microsoft.Diagnostics.TestHelpers
     {
         /// <summary>
         /// Creates a new CliDebuggeeCompiler. This compiler acquires the CLI tools and uses them to build and optionally link debuggees via dotnet publish.
-		/// <param name="config">
-		///   LinkerPackageVersion   If set, this version of the linker package will be used to link the debuggee during publish.
-		/// </param>
+        /// <param name="config">
+        ///   LinkerPackageVersion   If set, this version of the linker package will be used to link the debuggee during publish.
+        /// </param>
         /// </summary>
-        public CliDebuggeeCompiler(TestConfiguration config, string debuggeeName) : base(config, debuggeeName) {}
+        public CliDebuggeeCompiler(TestConfiguration config, string debuggeeName) : base(config, debuggeeName) { }
 
-        private static Dictionary<string,string> GetBuildProperties(TestConfiguration config, string runtimeIdentifier)
+        private static Dictionary<string, string> GetBuildProperties(TestConfiguration config, string runtimeIdentifier)
         {
-            Dictionary<string, string> buildProperties = new Dictionary<string, string>();
-            buildProperties.Add("RuntimeFrameworkVersion", config.BuildProjectMicrosoftNetCoreAppVersion);
+            Dictionary<string, string> buildProperties = new();
+            string buildProjectMicrosoftNetCoreAppVersion = config.BuildProjectMicrosoftNetCoreAppVersion;
+            if (!string.IsNullOrEmpty(buildProjectMicrosoftNetCoreAppVersion))
+            {
+                buildProperties.Add("RuntimeFrameworkVersion", buildProjectMicrosoftNetCoreAppVersion);
+            }
             buildProperties.Add("BuildProjectFramework", config.BuildProjectFramework);
             if (runtimeIdentifier != null)
             {
                 buildProperties.Add("RuntimeIdentifier", runtimeIdentifier);
             }
-            string debugType = config.DebugType;
-            if (debugType == null)
+            if (config.PublishSingleFile)
             {
-                // The default PDB type is portable
-                debugType = "portable";
+                Debug.Assert(runtimeIdentifier != null);
+                buildProperties.Add("PublishSingleFile", "true");
+                buildProperties.Add("SelfContained", "true");
             }
+            string debugType = config.DebugType;
+            // The default PDB type is portable
+            debugType ??= "portable";
             buildProperties.Add("DebugType", debugType);
             return buildProperties;
         }
 
         protected override string GetFramework(TestConfiguration config)
         {
-            return config.BuildProjectFramework ?? "netcoreapp2.0";
+            return config.BuildProjectFramework ?? "net6.0";
         }
 
         protected override string GetDebuggeeBinaryDirPath(string debuggeeProjectDirPath, string framework, string runtime)
@@ -60,14 +67,16 @@ namespace Microsoft.Diagnostics.TestHelpers
             string debuggeeSolutionDirPath = GetDebuggeeSolutionDirPath(dotNetRootBuildDirPath, debuggeeName);
             string debuggeeProjectDirPath = GetDebuggeeProjectDirPath(debuggeeSolutionDirPath, initialSourceDirPath, debuggeeName);
             string debuggeeBinaryDirPath = GetDebuggeeBinaryDirPath(debuggeeProjectDirPath, framework, runtimeIdentifier);
-            string debuggeeBinaryDllPath = config.IsNETCore ? GetDebuggeeBinaryDllPath(debuggeeBinaryDirPath, debuggeeName) : null;
-            string debuggeeBinaryExePath = config.IsDesktop ? GetDebuggeeBinaryExePath(debuggeeBinaryDirPath, debuggeeName) : null;
+            string debuggeeBinaryDllPath = GetDebuggeeBinaryDllPath(config, debuggeeBinaryDirPath, debuggeeName);
+            string debuggeeBinaryExePath = GetDebuggeeBinaryExePath(config, debuggeeBinaryDirPath, debuggeeName);
             string logPath = GetLogPath(config, framework, runtimeIdentifier, debuggeeName);
             return new CsprojBuildDebuggeeTestStep(dotNetPath,
                                                initialSourceDirPath,
+                                               config.DebuggeeMsbuildAuxRoot,
                                                GetDebuggeeNativeLibDirPath(config, debuggeeName),
                                                GetBuildProperties(config, runtimeIdentifier),
                                                runtimeIdentifier,
+                                               config.BuildProjectFramework,
                                                config.LinkerPackageVersion,
                                                debuggeeName,
                                                debuggeeSolutionDirPath,

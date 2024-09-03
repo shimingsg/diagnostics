@@ -1,29 +1,17 @@
-<!-- Copyright (c)  Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information. -->
 <Project>
   <Import Project="$(MSBuildThisFileDirectory)..\Directory.Build.props"/>
   <Import Project="Sdk.props" Sdk="Microsoft.DotNet.Arcade.Sdk" />
-  
+
   <PropertyGroup>
-    <IsShipping>true</IsShipping>
-    <IsShippingAssembly>false</IsShippingAssembly>
+    <IsShipping>false</IsShipping>
     <WarnOnPackingNonPackableProject>false</WarnOnPackingNonPackableProject>
     <NoPackageAnalysis>true</NoPackageAnalysis>
     <DebugSymbols>true</DebugSymbols>
+    <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+    <BundledToolsPath>$(ArtifactsDir)bundledtools/</BundledToolsPath>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
-    <CheckForOverflowUnderflow>false</CheckForOverflowUnderflow>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
-    <CheckForOverflowUnderflow>false</CheckForOverflowUnderflow>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net462'">
-    <DebugType>full</DebugType>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(TargetFramework)' != 'net462'">
-    <DebugType>portable</DebugType>
-  </PropertyGroup>
+  <Import Project="$(RepositoryEngineeringDir)native\naming.props" />
+  <Import Condition="'$(DotNetBuildSourceOnly)' != 'true'"
+          Project="$(RepositoryEngineeringDir)Analyzers.props" />
 </Project>

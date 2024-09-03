@@ -1,14 +1,12 @@
-// Brain dead debuggee to test GCWhere
-// Basically create a single object and ensure that it is kept
-// alive and not optimized away. Verify that GC.Collect causes
-// the object to pass though the GC generations until it hits
-// Gen 2 where it should stay.
+// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
 using System;
 using System.IO;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-class GCWhere
+internal class GCWhere
 {
     private string _string;
     private static ulong _static = 52704621242434;
@@ -17,7 +15,8 @@ class GCWhere
     {
         _string = inputString;
     }
-    string TempString
+
+    private string TempString
     {
         get { return _string; }
     }
@@ -30,7 +29,7 @@ class GCWhere
     // several GC collections to happen which will cause the
     // object to move from Gen0 to Gen1 to Gen2 where it should
     // stay
-    static int Main() 
+    private static int Main() 
     {
         GCWhere temp = new GCWhere("This is a string!!");
         StringWriter textWriter = new StringWriter();
@@ -45,7 +44,7 @@ class GCWhere
         Debugger.Break();   // GCWhere should temp in Gen2                
         GC.Collect();
         int genFourthTime = GC.GetGeneration(temp);
-        Console.WriteLine("1st: {0} 2nd: {1}, 3rd: {2} 4th: {3}", genFirstTime, genSecondTime, genThirdTime, genFourthTime);
+        Console.WriteLine($"1st: {genFirstTime} 2nd: {genSecondTime}, 3rd: {genThirdTime} 4th: {genFourthTime}");
         Debugger.Break();   // GCWhere should temp in Gen2                
         PrintIt(temp);
         GC.KeepAlive(temp);
@@ -53,7 +52,7 @@ class GCWhere
     }
 
     // This is here because without calling something with the object as an argument it'll get optimized away
-    static void PrintIt(GCWhere temp)
+    private static void PrintIt(GCWhere temp)
     {
         Console.WriteLine(temp.TempString);
     }

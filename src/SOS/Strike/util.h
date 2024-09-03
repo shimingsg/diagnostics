@@ -1,16 +1,10 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
-// ==++==
-// 
- 
-// 
-// ==--==
 #ifndef __util_h__
 #define __util_h__
 
-#define LIMITED_METHOD_CONTRACT
+#define CONVERT_FROM_SIGN_EXTENDED(offset) ((ULONG_PTR)(offset))
 
 // So we can use the PAL_TRY_NAKED family of macros without dependencies on utilcode.
 inline void RestoreSOToleranceState() {}
@@ -19,7 +13,6 @@ inline void RestoreSOToleranceState() {}
 #include <corsym.h>
 #include <clrdata.h>
 #include <palclr.h>
-#include <metahost.h>
 #include <new>
 #include <functional>
 
@@ -35,19 +28,27 @@ inline void RestoreSOToleranceState() {}
 #include "data.h"
 #endif //STRIKE
 
-#include "cordebug.h"
-#include "static_assert.h"
+#include <cordebug.h>
+#include <static_assert.h>
 #include <string>
-#include "hostcoreclr.h"
+#include <extensions.h>
+#include <releaseholder.h>
+#include "hostimpl.h"
+#include "targetimpl.h"
+#include "runtimeimpl.h"
+#include "symbols.h"
+#include "crosscontext.h"
 
 typedef LPCSTR  LPCUTF8;
 typedef LPSTR   LPUTF8;
 
+#include "contract.h"
+#undef NOTHROW
 #ifdef FEATURE_PAL
 #define NOTHROW
 #else
 #define NOTHROW (std::nothrow)
-#endif 
+#endif
 
 DECLARE_HANDLE(OBJECTHANDLE);
 
@@ -71,23 +72,16 @@ DECLARE_HANDLE(OBJECTHANDLE);
 #define TARGET_POINTER_SIZE POINTERSIZE_BYTES
 #endif // TARGET_POINTER_SIZE
 
-#if defined(_MSC_VER)
-#pragma warning(disable:4510 4512 4610)
-#endif
-
-#ifndef _ASSERTE
+#undef _ASSERTE
 #ifdef _DEBUG
 #define _ASSERTE(expr)         \
     do { if (!(expr) ) { ExtErr("_ASSERTE fired:\n\t%s\n", #expr); if (IsDebuggerPresent()) DebugBreak(); } } while (0)
 #else
-#define _ASSERTE(x)
+#define _ASSERTE(expr) ((void)0)
 #endif
-#endif // ASSERTE
 
-#ifdef _DEBUG
-#define ASSERT_CHECK(expr, msg, reason)         \
-        do { if (!(expr) ) { ExtOut(reason); ExtOut(msg); ExtOut(#expr); DebugBreak(); } } while (0)
-#endif
+#undef _ASSERT
+#define _ASSERT _ASSERTE
 
 // The native symbol reader dll name
 #if defined(_AMD64_)
@@ -97,54 +91,8 @@ DECLARE_HANDLE(OBJECTHANDLE);
 #elif defined(_ARM_)
 #define NATIVE_SYMBOL_READER_DLL "Microsoft.DiaSymReader.Native.arm.dll"
 #elif defined(_ARM64_)
-// Use diasymreader until the package has an arm64 version - issue #7360
-//#define NATIVE_SYMBOL_READER_DLL "Microsoft.DiaSymReader.Native.arm64.dll"
-#define NATIVE_SYMBOL_READER_DLL "diasymreader.dll"
+#define NATIVE_SYMBOL_READER_DLL "Microsoft.DiaSymReader.Native.arm64.dll"
 #endif
-
-// PREFIX macros - Begin
-
-// SOS does not have support for Contracts.  Therefore we needed to duplicate
-// some of the PREFIX infrastructure from inc\check.h in here.
-
-// Issue - PREFast_:510  v4.51 does not support __assume(0)
-#if (defined(_MSC_VER) && !defined(_PREFAST_)) || defined(_PREFIX_)
-#if defined(_AMD64_)
-// Empty methods that consist of UNREACHABLE() result in a zero-sized declspec(noreturn) method
-// which causes the pdb file to make the next method declspec(noreturn) as well, thus breaking BBT
-// Remove when we get a VC compiler that fixes VSW 449170
-# define __UNREACHABLE() DebugBreak(); __assume(0);
-#else
-# define __UNREACHABLE() __assume(0)
-#endif
-#else
-#define __UNREACHABLE()  do { } while(true)
-#endif
-
-
-#if defined(_PREFAST_) || defined(_PREFIX_) 
-#define COMPILER_ASSUME_MSG(_condition, _message) if (!(_condition)) __UNREACHABLE();
-#else
-
-#if defined(DACCESS_COMPILE)
-#define COMPILER_ASSUME_MSG(_condition, _message) do { } while (0)
-#else
-
-#if defined(_DEBUG)
-#define COMPILER_ASSUME_MSG(_condition, _message) \
-    ASSERT_CHECK(_condition, _message, "Compiler optimization assumption invalid")
-#else
-#define COMPILER_ASSUME_MSG(_condition, _message) __assume(_condition)
-#endif // _DEBUG
-
-#endif // DACCESS_COMPILE
-
-#endif // _PREFAST_ || _PREFIX_
-
-#define PREFIX_ASSUME(_condition) \
-    COMPILER_ASSUME_MSG(_condition, "")
-
-// PREFIX macros - End
 
 class MethodTable;
 
@@ -168,14 +116,10 @@ class MethodTable;
 #define HNDTYPE_SIZEDREF                        (8)
 #define HNDTYPE_WEAK_WINRT                      (9)
 
-// Anything above this we consider abnormal and stop processing heap information
-const int nMaxHeapSegmentCount = 1000;
-
 class BaseObject
 {
     MethodTable    *m_pMethTab;
 };
-
 
 const BYTE gElementTypeInfo[] = {
 #define TYPEINFO(e,ns,c,s,g,ia,ip,if,im,gv)    s,
@@ -189,7 +133,7 @@ typedef struct tagLockEntry
     tagLockEntry *pPrev;    // prev entry
     DWORD dwULockID;
     DWORD dwLLockID;        // owning lock
-    WORD wReaderLevel;      // reader nesting level    
+    WORD wReaderLevel;      // reader nesting level
 } LockEntry;
 
 #define MAX_CLASSNAME_LENGTH    1024
@@ -199,11 +143,9 @@ enum EEFLAVOR {UNKNOWNEE, MSCOREE, MSCORWKS, MSCOREND};
 #include "sospriv.h"
 extern IXCLRDataProcess *g_clrData;
 extern ISOSDacInterface *g_sos;
+extern ISOSDacInterface15 *g_sos15;
 
 #include "dacprivate.h"
-
-interface ICorDebugProcess;
-extern ICorDebugProcess * g_pCorDebugProcess;
 
 // This class is templated for easy modification.  We may need to update the CachedString
 // or related classes to use WCHAR instead of char in the future.
@@ -277,7 +219,7 @@ public:
     {
         return mIndex == -2;
     }
-    
+
     // allocate a string of the specified size.  this will Clear() any
     // previously allocated string.  call IsOOM() to check for failure.
     void Allocate(int size);
@@ -307,7 +249,7 @@ private:
     // -1 - mPtr points to a pointer we have new'ed
     // -2 - We hit an oom trying to allocate either mCount or mPtr
     int mIndex;
-    
+
     // contains the size of current string
     int mSize;
 
@@ -324,22 +266,22 @@ namespace Output
     extern unsigned int g_DMLEnable;
     extern bool g_bDbgOutput;
     extern bool g_bDMLExposed;
-    
+
     inline bool IsOutputSuppressed()
     { return g_bSuppressOutput > 0; }
-    
+
     inline void ResetIndent()
     { g_Indent = 0; }
-    
+
     inline void SetDebugOutputEnabled(bool enabled)
     { g_bDbgOutput = enabled; }
-    
+
     inline bool IsDebugOutputEnabled()
     { return g_bDbgOutput; }
 
     inline void SetDMLExposed(bool exposed)
     { g_bDMLExposed = exposed; }
-    
+
     inline bool IsDMLExposed()
     { return g_bDMLExposed; }
 
@@ -365,6 +307,11 @@ namespace Output
         DML_ManagedVar,
         DML_Async,
         DML_IL,
+        DML_ComWrapperRCW,
+        DML_ComWrapperCCW,
+        DML_TaggedMemory,
+
+        DML_Last
     };
 
     /**********************************************************************\
@@ -374,14 +321,29 @@ namespace Output
     * of addr.                                                             *
     *                                                                      *
     * Params:                                                              *
+    *   disp - the display address of the object                           *
     *   mt - the method table of the ValueClass                            *
     *   addr - the address of the ValueClass                               *
     *   type - the format type to use to output this object                *
     *   fill - whether or not to pad the hex value with zeros              *
     *                                                                      *
     \**********************************************************************/
-    CachedString BuildVCValue(CLRDATA_ADDRESS mt, CLRDATA_ADDRESS addr, FormatType type, bool fill = true);
-    
+    CachedString BuildVCValue(CLRDATA_ADDRESS disp, CLRDATA_ADDRESS mt, CLRDATA_ADDRESS addr, FormatType type, bool fill = true);
+
+    /**********************************************************************\
+    * This function builds a DML string with a display name.  If DML is enabled,  *
+    * this function returns a DML string based on the format type.         *
+    * Otherwise this returns a string containing only the hex value of     *
+    * addr.                                                                *
+    *                                                                      *
+    * Params:                                                              *
+    *   disp - the display address of the object                           *
+    *   addr - the address of the object                                   *
+    *   type - the format type to use to output this object                *
+    *   fill - whether or not to pad the hex value with zeros              *
+    *                                                                      *
+    \**********************************************************************/
+    CachedString BuildHexValue(CLRDATA_ADDRESS disp, CLRDATA_ADDRESS addr, FormatType type, bool fill = true);
 
     /**********************************************************************\
     * This function builds a DML string for an object.  If DML is enabled, *
@@ -391,11 +353,12 @@ namespace Output
     *                                                                      *
     * Params:                                                              *
     *   addr - the address of the object                                   *
+    *   len  - associated length                                           *
     *   type - the format type to use to output this object                *
     *   fill - whether or not to pad the hex value with zeros              *
     *                                                                      *
     \**********************************************************************/
-    CachedString BuildHexValue(CLRDATA_ADDRESS addr, FormatType type, bool fill = true);
+    CachedString BuildHexValueWithLength(CLRDATA_ADDRESS addr, size_t len, FormatType type, bool fill = true);
 
     /**********************************************************************\
     * This function builds a DML string for an managed variable name.      *
@@ -453,29 +416,33 @@ inline void DecrementIndent()  { if (Output::g_Indent > 0) Output::g_Indent--; }
 inline void ExtOutIndent()  { WhitespaceOut(Output::g_Indent << 2); }
 
 // DML Generation Methods
-#define DMLListNearObj(addr) Output::BuildHexValue(addr, Output::DML_ListNearObj).GetPtr()
-#define DMLDumpHeapMT(addr) Output::BuildHexValue(addr, Output::DML_DumpHeapMT).GetPtr()
-#define DMLMethodTable(addr) Output::BuildHexValue(addr, Output::DML_MethodTable).GetPtr()
-#define DMLMethodDesc(addr) Output::BuildHexValue(addr, Output::DML_MethodDesc).GetPtr()
-#define DMLClass(addr) Output::BuildHexValue(addr, Output::DML_EEClass).GetPtr()
-#define DMLModule(addr) Output::BuildHexValue(addr, Output::DML_Module).GetPtr()
-#define DMLIP(ip) Output::BuildHexValue(ip, Output::DML_IP).GetPtr()
-#define DMLObject(addr) Output::BuildHexValue(addr, Output::DML_Object).GetPtr()
-#define DMLDomain(addr) Output::BuildHexValue(addr, Output::DML_Domain).GetPtr()
-#define DMLAssembly(addr) Output::BuildHexValue(addr, Output::DML_Assembly).GetPtr()
-#define DMLThreadID(id) Output::BuildHexValue(id, Output::DML_ThreadID, false).GetPtr()
-#define DMLValueClass(mt, addr) Output::BuildVCValue(mt, addr, Output::DML_ValueClass).GetPtr()
-#define DMLRCWrapper(addr) Output::BuildHexValue(addr, Output::DML_RCWrapper).GetPtr()
-#define DMLCCWrapper(addr) Output::BuildHexValue(addr, Output::DML_CCWrapper).GetPtr()
+#define DMLListNearObj(addr) Output::BuildHexValue(addr, addr, Output::DML_ListNearObj).GetPtr()
+#define DMLDumpHeapMT(addr) Output::BuildHexValue(addr, addr, Output::DML_DumpHeapMT).GetPtr()
+#define DMLMethodTable(addr) Output::BuildHexValue(addr, addr, Output::DML_MethodTable).GetPtr()
+#define DMLMethodDesc(addr) Output::BuildHexValue(addr, addr, Output::DML_MethodDesc).GetPtr()
+#define DMLClass(addr) Output::BuildHexValue(addr, addr, Output::DML_EEClass).GetPtr()
+#define DMLModule(addr) Output::BuildHexValue(addr, addr, Output::DML_Module).GetPtr()
+#define DMLIP(ip) Output::BuildHexValue(ip, ip, Output::DML_IP).GetPtr()
+#define DMLObject(addr) Output::BuildHexValue(addr, addr, Output::DML_Object).GetPtr()
+#define DMLByRefObject(byref, addr) Output::BuildHexValue(byref, addr, Output::DML_Object).GetPtr()
+#define DMLDomain(addr) Output::BuildHexValue(addr, addr, Output::DML_Domain).GetPtr()
+#define DMLAssembly(addr) Output::BuildHexValue(addr, addr, Output::DML_Assembly).GetPtr()
+#define DMLThreadID(id) Output::BuildHexValue(id, id, Output::DML_ThreadID, false).GetPtr()
+#define DMLValueClass(mt, addr) Output::BuildVCValue(addr, mt, addr, Output::DML_ValueClass).GetPtr()
+#define DMLByRefValueClass(byref, mt, addr) Output::BuildVCValue(byref, mt, addr, Output::DML_ValueClass).GetPtr()
+#define DMLRCWrapper(addr) Output::BuildHexValue(addr, addr, Output::DML_RCWrapper).GetPtr()
+#define DMLCCWrapper(addr) Output::BuildHexValue(addr, addr, Output::DML_CCWrapper).GetPtr()
 #define DMLManagedVar(expansionName,frame,simpleName) Output::BuildManagedVarValue(expansionName, frame, simpleName, Output::DML_ManagedVar).GetPtr()
-#define DMLAsync(addr) Output::BuildHexValue(addr, Output::DML_Async).GetPtr()
-#define DMLIL(addr) Output::BuildHexValue(addr, Output::DML_IL).GetPtr()
+#define DMLAsync(addr) Output::BuildHexValue(addr, addr, Output::DML_Async).GetPtr()
+#define DMLIL(addr) Output::BuildHexValue(addr, addr, Output::DML_IL).GetPtr()
+#define DMLComWrapperRCW(addr) Output::BuildHexValue(addr, addr, Output::DML_ComWrapperRCW).GetPtr()
+#define DMLComWrapperCCW(addr) Output::BuildHexValue(addr, addr, Output::DML_ComWrapperCCW).GetPtr()
+#define DMLTaggedMemory(addr, len) Output::BuildHexValueWithLength(addr, len, Output::DML_TaggedMemory).GetPtr()
 
 bool IsDMLEnabled();
 
-
 #ifndef SOS_Assert
-#define SOS_Assert(x)
+#define SOS_Assert _ASSERTE
 #endif
 
 void ConvertToLower(__out_ecount(len) char *buffer, size_t len);
@@ -493,7 +460,7 @@ public:
         : mStr(0), mSize(0), mLength(0)
     {
         const size_t size = 64;
-        
+
         mStr = new T[size];
         mSize = size;
         mStr[0] = 0;
@@ -557,7 +524,7 @@ public:
     {
         return mStr;
     }
-    
+
     const T *c_str() const
     {
         return mStr;
@@ -575,11 +542,11 @@ private:
         const size_t size = len1 + len2 + 1 + ((len1 + len2) >> 1);
         mStr = new T[size];
         mSize = size;
-        
+
         CopyFrom(str1, len1);
         CopyFrom(str2, len2);
     }
-    
+
     void Clear()
     {
         mLength = 0;
@@ -625,7 +592,7 @@ private:
         {
             newStr[0] = 0;
         }
-        
+
         mStr = newStr;
         mSize = size;
     }
@@ -636,7 +603,6 @@ private:
 
 typedef BaseString<char, strlen, strcpy_s> String;
 typedef BaseString<WCHAR, _wcslen, wcscpy_s> WString;
-
 
 template<class T>
 void Flatten(__out_ecount(len) T *data, unsigned int len)
@@ -714,7 +680,7 @@ namespace Output
             {
                 const int len = GetDMLWidth(mDml);
                 char *buffer = (char*)alloca(len);
-            
+
                 BuildDML(buffer, len, (CLRDATA_ADDRESS)mValue, mFormat, mDml);
                 DMLOut(buffer);
             }
@@ -763,7 +729,7 @@ namespace Output
             {
                 const int len = GetDMLColWidth(mDml, width);
                 char *buffer = (char*)alloca(len);
-            
+
                 BuildDMLCol(buffer, len, (CLRDATA_ADDRESS)mValue, mFormat, mDml, leftAlign, width);
                 DMLOut(buffer);
             }
@@ -801,7 +767,7 @@ namespace Output
                 }
             }
         }
-    
+
         /* Converts this object into a Wide char string.  This allows you to write the following code:
          *    WString foo = L"bar " + ObjectPtr(obj);
          * Where ObjectPtr is a subclass/typedef of this Format class.
@@ -810,15 +776,15 @@ namespace Output
         {
             String str = *this;
             const char *cstr = (const char *)str;
-        
+
             int len = MultiByteToWideChar(CP_ACP, 0, cstr, -1, NULL, 0);
             WCHAR *buffer = (WCHAR *)alloca(len*sizeof(WCHAR));
-        
+
             MultiByteToWideChar(CP_ACP, 0, cstr, -1, buffer, len);
-        
+
             return WString(buffer);
         }
-    
+
         /* Converts this object into a String object.  This allows you to write the following code:
          *    String foo = "bar " + ObjectPtr(obj);
          * Where ObjectPtr is a subclass/typedef of this Format class.
@@ -829,7 +795,7 @@ namespace Output
             {
                 const int len = GetDMLColWidth(mDml, 0);
                 char *buffer = (char*)alloca(len);
-            
+
                 BuildDMLCol(buffer, len, (CLRDATA_ADDRESS)mValue, mFormat, mDml, false, 0);
                 return buffer;
             }
@@ -838,8 +804,8 @@ namespace Output
                 char buffer[64];
                 if (mFormat == Formats::Default || mFormat == Formats::Pointer)
                 {
-                    sprintf_s(buffer, _countof(buffer), "%p", (int *)(SIZE_T)mValue);
-                    ConvertToLower(buffer, _countof(buffer));
+                    sprintf_s(buffer, ARRAY_SIZE(buffer), "%p", (int *)(SIZE_T)mValue);
+                    ConvertToLower(buffer, ARRAY_SIZE(buffer));
                 }
                 else
                 {
@@ -851,10 +817,10 @@ namespace Output
                     else if (mFormat == Formats::Decimal)
                         format = "%d";
 
-                    sprintf_s(buffer, _countof(buffer), format, (__int32)mValue);
-                    ConvertToLower(buffer, _countof(buffer));
+                    sprintf_s(buffer, ARRAY_SIZE(buffer), format, (__int32)mValue);
+                    ConvertToLower(buffer, ARRAY_SIZE(buffer));
                 }
-                
+
                 return buffer;
             }
         }
@@ -899,38 +865,38 @@ namespace Output
         {
             BuildDMLCol(result, len, value, format, dmlType, true, 0);
         }
-    
+
         static int GetDMLWidth(Output::FormatType dmlType)
         {
             return GetDMLColWidth(dmlType, 0);
         }
-    
+
         static void BuildDMLCol(__out_ecount(len) char *result, int len, CLRDATA_ADDRESS value, Formats::Format format, Output::FormatType dmlType, bool leftAlign, int width)
         {
             char hex[64];
-            int count = GetHex(value, hex, _countof(hex), format != Formats::Hex);
+            int count = GetHex(value, hex, ARRAY_SIZE(hex), format != Formats::Hex);
             int i = 0;
-    
+
             if (!leftAlign)
             {
                 for (; i < width - count; ++i)
                     result[i] = ' ';
-        
+
                 result[i] = 0;
             }
-    
+
             int written = sprintf_s(result+i, len - i, DMLFormats[dmlType], hex, hex);
-    
+
             SOS_Assert(written != -1);
             if (written != -1)
             {
                 for (i = i + written; i < width; ++i)
                     result[i] = ' ';
-        
+
                 result[i] = 0;
             }
         }
-    
+
         static int GetDMLColWidth(Output::FormatType dmlType, int width)
         {
             return 1 + 4*sizeof(int*) + (int)strlen(DMLFormats[dmlType]) + width;
@@ -974,7 +940,7 @@ namespace Output
                 precision = width;
 
             const char *format = align == AlignLeft ? "%-*.*s" : "%*.*s";
-        
+
             if (IsDMLEnabled())
                 DMLOut(format, width, precision, mValue);
             else
@@ -1000,7 +966,7 @@ namespace Output
             : mValue(rhs.mValue)
         {
         }
-    
+
         void Output() const
         {
             if (IsDMLEnabled())
@@ -1152,7 +1118,7 @@ public:
      */
     void ReInit(int numColumns, int defaultColumnWidth, Alignment alignmentDefault = AlignLeft, int indent = 0, int padding = 1);
 
-    /* Sets the amount of whitespace to prefix at the start of the row (in characters). 
+    /* Sets the amount of whitespace to prefix at the start of the row (in characters).
      */
     void SetIndent(int indent)
     {
@@ -1189,7 +1155,7 @@ public:
      */
     void SetColAlignment(int col, Alignment align);
 
-    
+
     /* The WriteRow family of functions allows you to write an entire row of the table at once.
      * The common use case for the TableOutput class is to individually output each column after
      * calculating what the value should contain.  However, this would be tedious if you already
@@ -1223,7 +1189,7 @@ public:
         WriteColumn(3, t3);
     }
 
-    
+
     template <class T0, class T1, class T2, class T3, class T4>
     void WriteRow(T0 t0, T1 t1, T2 t2, T3 t3, T4 t4)
     {
@@ -1233,7 +1199,7 @@ public:
         WriteColumn(3, t3);
         WriteColumn(4, t4);
     }
-    
+
     template <class T0, class T1, class T2, class T3, class T4, class T5>
     void WriteRow(T0 t0, T1 t1, T2 t2, T3 t3, T4 t4, T5 t5)
     {
@@ -1288,7 +1254,7 @@ public:
 
         if (col == 0)
             OutputIndent();
-        
+
         bool lastCol = col == mColumns - 1;
 
         if (!lastCol)
@@ -1303,7 +1269,7 @@ public:
         else
             mCurrCol = col+1;
     }
-    
+
     template <class T>
     void WriteColumn(int col, T t)
     {
@@ -1329,7 +1295,7 @@ public:
     {
         WriteColumn(col, Output::Format<const WCHAR *>(str));
     }
-    
+
     inline void WriteColumn(int col, __in_z char *str)
     {
         WriteColumn(col, Output::Format<const char *>(str));
@@ -1344,22 +1310,22 @@ public:
         SOS_Assert(strstr(fmt, "%S") == NULL);
 
         char result[128];
-        
+
         va_list list;
         va_start(list, fmt);
-        vsprintf_s(result, _countof(result), fmt, list);
+        vsprintf_s(result, ARRAY_SIZE(result), fmt, list);
         va_end(list);
 
         WriteColumn(col, result);
     }
-    
+
     void WriteColumnFormat(int col, const WCHAR *fmt, ...)
     {
         WCHAR result[128];
-        
+
         va_list list;
         va_start(list, fmt);
-        vswprintf_s(result, _countof(result), fmt, list);
+        vswprintf_s(result, ARRAY_SIZE(result), fmt, list);
         va_end(list);
 
         WriteColumn(col, result);
@@ -1390,10 +1356,13 @@ private:
     Alignment *mAlignments;
 };
 
+#ifndef FEATURE_PAL
+HRESULT GetClrModuleImages(__in IXCLRDataModule* module, __in CLRDataModuleExtentType desiredType, __out PULONG64 pBase, __out PULONG64 pSize);
+#endif
 HRESULT GetMethodDefinitionsFromName(DWORD_PTR ModulePtr, IXCLRDataModule* mod, const char* name, IXCLRDataMethodDefinition **ppMethodDefinitions, int numMethods, int *numMethodsNeeded);
 HRESULT GetMethodDescsFromName(DWORD_PTR ModulePtr, IXCLRDataModule* mod, const char* name, DWORD_PTR **pOut, int *numMethodDescs);
 
-HRESULT FileNameForModule (DacpModuleData *pModule, __out_ecount (MAX_LONGPATH) WCHAR *fileName);
+HRESULT FileNameForModule (const DacpModuleData * const pModule, __out_ecount (MAX_LONGPATH) WCHAR *fileName);
 HRESULT FileNameForModule (DWORD_PTR pModuleAddr, __out_ecount (MAX_LONGPATH) WCHAR *fileName);
 void IP2MethodDesc (DWORD_PTR IP, DWORD_PTR &methodDesc, JITTypes &jitType,
                     DWORD_PTR &gcinfoAddr);
@@ -1402,14 +1371,14 @@ void DisplayFields (CLRDATA_ADDRESS cdaMT, DacpMethodTableData *pMTD, DacpMethod
                     DWORD_PTR dwStartAddr = 0, BOOL bFirst=TRUE, BOOL bValueClass=FALSE);
 int GetObjFieldOffset(CLRDATA_ADDRESS cdaObj, __in_z LPCWSTR wszFieldName, BOOL bFirst=TRUE);
 int GetObjFieldOffset(CLRDATA_ADDRESS cdaObj, CLRDATA_ADDRESS cdaMT, __in_z LPCWSTR wszFieldName, BOOL bFirst=TRUE, DacpFieldDescData* pDacpFieldDescData=NULL);
-int GetValueFieldOffset(CLRDATA_ADDRESS cdaMT, __in_z LPCWSTR wszFieldName, DacpFieldDescData* pDacpFieldDescData);
+int GetValueFieldOffset(CLRDATA_ADDRESS cdaMT, __in_z LPCWSTR wszFieldName, DacpFieldDescData* pDacpFieldDescData=NULL);
 
 BOOL IsValidToken(DWORD_PTR ModuleAddr, mdTypeDef mb);
-void NameForToken_s(DacpModuleData *pModule, mdTypeDef mb, __out_ecount (capacity_mdName) WCHAR *mdName, size_t capacity_mdName, 
+void NameForToken_s(DacpModuleData *pModule, mdTypeDef mb, __out_ecount (capacity_mdName) WCHAR *mdName, size_t capacity_mdName,
                   bool bClassName=true);
-void NameForToken_s(DWORD_PTR ModuleAddr, mdTypeDef mb, __out_ecount (capacity_mdName) WCHAR *mdName, size_t capacity_mdName, 
+void NameForToken_s(DWORD_PTR ModuleAddr, mdTypeDef mb, __out_ecount (capacity_mdName) WCHAR *mdName, size_t capacity_mdName,
                   bool bClassName=true);
-HRESULT NameForToken_s(mdTypeDef mb, IMetaDataImport *pImport, __out_ecount (capacity_mdName) WCHAR *mdName,  size_t capacity_mdName, 
+HRESULT NameForToken_s(mdTypeDef mb, IMetaDataImport *pImport, __out_ecount (capacity_mdName) WCHAR *mdName,  size_t capacity_mdName,
                      bool bClassName);
 
 void vmmap();
@@ -1440,16 +1409,18 @@ int bitidx(SCALAR bitflag)
     return -1;
 }
 
+#ifndef FEATURE_PAL
 HRESULT
 DllsName(
     ULONG_PTR addrContaining,
     __out_ecount (MAX_LONGPATH) WCHAR *dllName
     );
+#endif
 
 inline
 BOOL IsElementValueType (CorElementType cet)
 {
-    return (cet >= ELEMENT_TYPE_BOOLEAN && cet <= ELEMENT_TYPE_R8) 
+    return (cet >= ELEMENT_TYPE_BOOLEAN && cet <= ELEMENT_TYPE_R8)
         || cet == ELEMENT_TYPE_VALUETYPE || cet == ELEMENT_TYPE_I || cet == ELEMENT_TYPE_U;
 }
 
@@ -1459,7 +1430,7 @@ SafeReadMemory (TO_TADDR(src), &(dst), sizeof(dst), NULL)
 
 extern "C" PDEBUG_DATA_SPACES g_ExtData;
 
-#include <arrayholder.h>
+#include "arrayholder.h"
 
 // This class acts a smart pointer which calls the Release method on any object
 // you place in it when the ToRelease class falls out of scope.  You may use it
@@ -1477,11 +1448,11 @@ public:
     ToRelease()
         : m_ptr(NULL)
     {}
-    
+
     ToRelease(T* ptr)
         : m_ptr(ptr)
     {}
-    
+
     ~ToRelease()
     {
         Release();
@@ -1520,7 +1491,7 @@ public:
         m_ptr = NULL;
         return pT;
     }
-    
+
     void Release()
     {
         if (m_ptr != NULL)
@@ -1531,17 +1502,8 @@ public:
     }
 
 private:
-    T* m_ptr;    
+    T* m_ptr;
 };
-
-struct ModuleInfo
-{
-    ULONG64 baseAddr;
-    ULONG64 size;
-    ULONG index;
-    BOOL hasPdb;
-};
-extern ModuleInfo g_moduleInfo[];
 
 BOOL InitializeHeapData();
 BOOL IsServerBuild ();
@@ -1556,19 +1518,18 @@ void DecodeIL(IMetaDataImport *pImport, BYTE *buffer, ULONG bufSize);
 void DecodeDynamicIL(BYTE *data, ULONG Size, DacpObjectData& tokenArray);
 ULONG DisplayILOperation(const UINT indentCount, BYTE* pBuffer, ULONG position, std::function<void(DWORD)>& func);
 
-HRESULT GetRuntimeModuleInfo(PULONG moduleIndex, PULONG64 moduleBase);
-EEFLAVOR GetEEFlavor ();
-HRESULT InitCorDebugInterface();
-VOID UninitCorDebugInterface();
-BOOL GetEEVersion(VS_FIXEDFILEINFO* pFileInfo, char* fileVersionBuffer, int fileVersionBufferSizeInBytes);
 bool IsRuntimeVersion(DWORD major);
 bool IsRuntimeVersion(VS_FIXEDFILEINFO& fileInfo, DWORD major);
+bool IsRuntimeVersionAtLeast(DWORD major);
+bool IsRuntimeVersionAtLeast(VS_FIXEDFILEINFO& fileInfo, DWORD major);
+bool CheckBreakingRuntimeChange(int* pVersion = nullptr);
 #ifndef FEATURE_PAL
 BOOL IsRetailBuild (size_t base);
 BOOL GetSOSVersion(VS_FIXEDFILEINFO *pFileInfo);
 #endif
 
 BOOL IsDumpFile ();
+const WCHAR GetTargetDirectorySeparatorW();
 
 // IsMiniDumpFile will return true if 1) we are in
 // a small format minidump, and g_InMinidumpSafeMode is true.
@@ -1578,51 +1539,21 @@ BOOL IsMiniDumpFile();
 void ReportOOM();
 
 BOOL SafeReadMemory (TADDR offset, PVOID lpBuffer, ULONG cb, PULONG lpcbBytesRead);
-#if !defined(_TARGET_WIN64_) && !defined(_ARM64_)
-// on 64-bit platforms TADDR and CLRDATA_ADDRESS are identical
-inline BOOL SafeReadMemory (CLRDATA_ADDRESS offset, PVOID lpBuffer, ULONG cb, PULONG lpcbBytesRead)
-{ return SafeReadMemory(TO_TADDR(offset), lpBuffer, cb, lpcbBytesRead); }
-#endif
-
 BOOL NameForMD_s (DWORD_PTR pMD, __out_ecount (capacity_mdName) WCHAR *mdName, size_t capacity_mdName);
 BOOL NameForMT_s (DWORD_PTR MTAddr, __out_ecount (capacity_mdName) WCHAR *mdName, size_t capacity_mdName);
 
-WCHAR *CreateMethodTableName(TADDR mt, TADDR cmt = NULL);
+WCHAR *CreateMethodTableName(TADDR mt, TADDR cmt = (TADDR)0);
 
 void isRetAddr(DWORD_PTR retAddr, DWORD_PTR* whereCalled);
 DWORD_PTR GetValueFromExpression (___in __in_z const char *const str);
+void LoadRuntimeSymbols();
 
-enum ModuleHeapType
-{
-    ModuleHeapType_ThunkHeap,
-    ModuleHeapType_LookupTableHeap
-};
+void DomainInfo(DacpAppDomainData* pDomain);
+void AssemblyInfo(DacpAssemblyData* pAssembly);
 
-HRESULT PrintDomainHeapInfo(const char *name, CLRDATA_ADDRESS adPtr, DWORD_PTR *size, DWORD_PTR *wasted = 0);
-DWORD_PTR PrintModuleHeapInfo(DWORD_PTR *moduleList, int count, ModuleHeapType type, DWORD_PTR *wasted = 0);
-void PrintHeapSize(DWORD_PTR total, DWORD_PTR wasted);
-void DomainInfo(DacpAppDomainData *pDomain);
-void AssemblyInfo(DacpAssemblyData *pAssembly);
-DWORD_PTR LoaderHeapInfo(CLRDATA_ADDRESS pLoaderHeapAddr, DWORD_PTR *wasted = 0);
-DWORD_PTR JitHeapInfo();
-DWORD_PTR VSDHeapInfo(CLRDATA_ADDRESS appDomain, DWORD_PTR *wasted = 0);
-
-DWORD GetNumComponents(TADDR obj);
-
-struct GenUsageStat
-{
-    size_t allocd;
-    size_t freed;
-    size_t unrooted;
-};
-
-struct HeapUsageStat
-{
-    GenUsageStat  genUsage[4]; // gen0, 1, 2, LOH
-};
+size_t GetNumComponents(TADDR obj);
 
 extern DacpUsefulGlobalsData g_special_usefulGlobals;
-BOOL GCHeapUsageStats(const DacpGcHeapDetails& heap, BOOL bIncUnreachable, HeapUsageStat *hpUsage);
 
 class HeapStat
 {
@@ -1704,7 +1635,7 @@ protected:
             info.GCInfo = NULL;
             info.ArrayOfVC = false;
             info.GCInfoBuffer = NULL;
-            info.LoaderAllocatorObjectHandle = NULL;
+            info.LoaderAllocatorObjectHandle = (TADDR)0;
         }
     };
     Node *head;
@@ -1720,8 +1651,8 @@ public:
 
     void Clear ();
 private:
-    int CompareData(DWORD_PTR n1, DWORD_PTR n2);    
-    void ReverseLeftMost (Node *root);    
+    int CompareData(DWORD_PTR n1, DWORD_PTR n2);
+    void ReverseLeftMost (Node *root);
 };
 
 extern MethodTableCache g_special_mtCache;
@@ -1733,7 +1664,7 @@ struct DumpArrayFlags
     BOOL bDetail;
     LPSTR strObject;
     BOOL bNoFieldsForElement;
-    
+
     DumpArrayFlags ()
         : startIndex(0), Length((DWORD_PTR)-1), bDetail(FALSE), strObject (0), bNoFieldsForElement(FALSE)
     {}
@@ -1763,37 +1694,10 @@ struct DumpArrayFlags
 
 HRESULT GetMTOfObject(TADDR obj, TADDR *mt);
 
-struct needed_alloc_context 
-{
-    BYTE*   alloc_ptr;   // starting point for next allocation
-    BYTE*   alloc_limit; // ending point for allocation region/quantum
-};
-
-struct AllocInfo
-{
-    needed_alloc_context *array;
-    int num;                     // number of allocation contexts in array
-
-    AllocInfo()
-        : array(NULL)
-        , num(0)
-    {}
-    void Init()
-    {
-        extern void GetAllocContextPtrs(AllocInfo *pallocInfo);
-        GetAllocContextPtrs(this);
-    }
-    ~AllocInfo()
-    { 
-        if (array != NULL) 
-            delete[] array; 
-    }
-};
-
 struct GCHandleStatistics
 {
     HeapStat hs;
-    
+
     DWORD strongHandleCount;
     DWORD pinnedHandleCount;
     DWORD asyncPinnedHandleCount;
@@ -1816,47 +1720,6 @@ struct GCHandleStatistics
     }
 };
 
-struct SegmentLookup
-{
-    DacpHeapSegmentData *m_segments;
-    int m_iSegmentsSize;
-    int m_iSegmentCount;
-        
-    SegmentLookup();
-    ~SegmentLookup();
-
-    void Clear();
-    BOOL AddSegment(DacpHeapSegmentData *pData);
-    CLRDATA_ADDRESS GetHeap(CLRDATA_ADDRESS object, BOOL& bFound);
-};
-
-class GCHeapSnapshot
-{
-private:
-    BOOL m_isBuilt;
-    DacpGcHeapDetails *m_heapDetails;
-    DacpGcHeapData m_gcheap;
-    SegmentLookup m_segments;
-
-    BOOL AddSegments(DacpGcHeapDetails& details);
-public:
-    GCHeapSnapshot();
-
-    BOOL Build();
-    void Clear();
-    BOOL IsBuilt() { return m_isBuilt; }
-
-    DacpGcHeapData *GetHeapData() { return &m_gcheap; }
-    
-    int GetHeapCount() { return m_gcheap.HeapCount; }    
-    
-    DacpGcHeapDetails *GetHeap(CLRDATA_ADDRESS objectPointer);
-    int GetGeneration(CLRDATA_ADDRESS objectPointer);
-
-    
-};
-extern GCHeapSnapshot g_snapshot;
-    
 BOOL IsSameModuleName (const char *str1, const char *str2);
 BOOL IsModule (DWORD_PTR moduleAddr);
 BOOL IsMethodDesc (DWORD_PTR value);
@@ -1890,10 +1753,6 @@ HRESULT GetModuleFromAddress(___in CLRDATA_ADDRESS peAddress, ___out IXCLRDataMo
 void GetInfoFromName(DWORD_PTR ModuleAddr, const char* name, mdTypeDef* retMdTypeDef=NULL);
 void GetInfoFromModule (DWORD_PTR ModuleAddr, ULONG token, DWORD_PTR *ret=NULL);
 
-    
-typedef void (*VISITGCHEAPFUNC)(DWORD_PTR objAddr,size_t Size,DWORD_PTR methodTable,LPVOID token);
-BOOL GCHeapsTraverse(VISITGCHEAPFUNC pFunc, LPVOID token, BOOL verify=true);
-
 /////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 struct strobjInfo
@@ -1902,42 +1761,10 @@ struct strobjInfo
     DWORD   m_StringLength;
 };
 
-// Just to make figuring out which fill pointer element matches a generation
-// a bit less confusing. This gen_segment function is ported from gc.cpp.
-inline unsigned int gen_segment (int gen)
-{
-    return (DAC_NUMBERGENERATIONS - gen - 1);
-}
-
-inline CLRDATA_ADDRESS SegQueue(DacpGcHeapDetails& heapDetails, int seg)
-{
-    return heapDetails.finalization_fill_pointers[seg - 1];
-}
-
-inline CLRDATA_ADDRESS SegQueueLimit(DacpGcHeapDetails& heapDetails, int seg)
-{
-    return heapDetails.finalization_fill_pointers[seg];
-}
-
-#define FinalizerListSeg (DAC_NUMBERGENERATIONS+1)
-#define CriticalFinalizerListSeg (DAC_NUMBERGENERATIONS)
-
-void GatherOneHeapFinalization(DacpGcHeapDetails& heapDetails, HeapStat *stat, BOOL bAllReady, BOOL bShort);
-
 CLRDATA_ADDRESS GetAppDomainForMT(CLRDATA_ADDRESS mtPtr);
 CLRDATA_ADDRESS GetAppDomain(CLRDATA_ADDRESS objPtr);
-void GCHeapInfo(const DacpGcHeapDetails &heap, DWORD_PTR &total_size);
-BOOL GCObjInHeap(TADDR taddrObj, const DacpGcHeapDetails &heap, 
-    TADDR_SEGINFO& trngSeg, int& gen, TADDR_RANGE& allocCtx, BOOL &bLarge);
-
-BOOL VerifyObject(const DacpGcHeapDetails &heap, const DacpHeapSegmentData &seg, DWORD_PTR objAddr, DWORD_PTR MTAddr, size_t objSize, 
-    BOOL bVerifyMember);
-BOOL VerifyObject(const DacpGcHeapDetails &heap, DWORD_PTR objAddr, DWORD_PTR MTAddr, size_t objSize, 
-    BOOL bVerifyMember);
 
 BOOL IsMTForFreeObj(DWORD_PTR pMT);
-void DumpStackObjectsHelper (TADDR StackTop, TADDR StackBottom, BOOL verifyFields);
-
 
 enum ARGTYPE {COBOOL,COSIZE_T,COHEX,COSTRING};
 struct CMDOption
@@ -1961,7 +1788,6 @@ void DumpMDInfoFromMethodDescData(DacpMethodDescData * pMethodDescData, BOOL fSt
 void GetDomainList(DWORD_PTR *&domainList, int &numDomain);
 HRESULT GetThreadList(DWORD_PTR **threadList, int *numThread);
 CLRDATA_ADDRESS GetCurrentManagedThread(); // returns current managed thread if any
-void GetAllocContextPtrs(AllocInfo *pallocInfo);
 
 void ReloadSymbolWithLineInfo();
 
@@ -1976,21 +1802,15 @@ size_t NextOSPageAddress (size_t addr);
 
 // This version of objectsize reduces the lookup of methodtables in the DAC.
 // It uses g_special_mtCache for it's work.
-BOOL GetSizeEfficient(DWORD_PTR dwAddrCurrObj, 
+BOOL GetSizeEfficient(DWORD_PTR dwAddrCurrObj,
     DWORD_PTR dwAddrMethTable, BOOL bLarge, size_t& s, BOOL& bContainsPointers);
 
 BOOL GetCollectibleDataEfficient(DWORD_PTR dwAddrMethTable, BOOL& bCollectible, TADDR& loaderAllocatorObjectHandle);
-
-// ObjSize now uses the methodtable cache for its work too.
-size_t ObjectSize (DWORD_PTR obj, BOOL fIsLargeObject=FALSE);
-size_t ObjectSize(DWORD_PTR obj, DWORD_PTR mt, BOOL fIsValueClass, BOOL fIsLargeObject=FALSE);
 
 void CharArrayContent(TADDR pos, ULONG num, bool widechar);
 void StringObjectContent (size_t obj, BOOL fLiteral=FALSE, const int length=-1);  // length=-1: dump everything in the string object.
 
 UINT FindAllPinnedAndStrong (DWORD_PTR handlearray[],UINT arraySize);
-void PrintNotReachableInRange(TADDR rngStart, TADDR rngEnd, BOOL bExcludeReadyForFinalization, 
-    HeapStat* stat, BOOL bShort);
 
 const char *EHTypeName(EHClauseType et);
 
@@ -2027,7 +1847,7 @@ extern IMetaDataImport* MDImportForModule (DWORD_PTR pModule);
 // 520 bytes, so use accordinly.
 //
 //*****************************************************************************
-template <DWORD SIZE, DWORD INCREMENT> 
+template <DWORD SIZE, DWORD INCREMENT>
 class CQuickBytesBase
 {
 public:
@@ -2056,7 +1876,7 @@ public:
         }
         else
         {
-            if (pbBuff) 
+            if (pbBuff)
                 delete[] (BYTE*)pbBuff;
             pbBuff = new BYTE[iItems];
             cbTotal = pbBuff ? iItems : 0;
@@ -2086,7 +1906,7 @@ public:
         pbBuffNew = new BYTE[iItems + INCREMENT];
         if (!pbBuffNew)
             return E_OUTOFMEMORY;
-        if (pbBuff) 
+        if (pbBuff)
         {
             memcpy(pbBuffNew, pbBuff, cbTotal);
             delete[] (BYTE*)pbBuff;
@@ -2100,7 +1920,7 @@ public:
         iSize = iItems;
         pbBuff = pbBuffNew;
         return NOERROR;
-        
+
     }
 
     operator PVOID()
@@ -2140,12 +1960,12 @@ public:
     }
 };
 
-template <DWORD CQUICKBYTES_BASE_SPECIFY_SIZE> 
+template <DWORD CQUICKBYTES_BASE_SPECIFY_SIZE>
 class CQuickBytesNoDtorSpecifySize : public CQuickBytesBase<CQUICKBYTES_BASE_SPECIFY_SIZE, CQUICKBYTES_INCREMENTAL_SIZE>
 {
 };
 
-template <DWORD CQUICKBYTES_BASE_SPECIFY_SIZE> 
+template <DWORD CQUICKBYTES_BASE_SPECIFY_SIZE>
 class CQuickBytesSpecifySize : public CQuickBytesNoDtorSpecifySize<CQUICKBYTES_BASE_SPECIFY_SIZE>
 {
 public:
@@ -2159,7 +1979,7 @@ public:
 
 
 #define STRING_SIZE 10
-class CQuickString : public CQuickBytesBase<STRING_SIZE, STRING_SIZE> 
+class CQuickString : public CQuickBytesBase<STRING_SIZE, STRING_SIZE>
 {
 public:
     CQuickString() { }
@@ -2168,7 +1988,7 @@ public:
     {
         Destroy();
     }
-    
+
     void *Alloc(SIZE_T iItems)
     {
         return CQuickBytesBase<STRING_SIZE, STRING_SIZE>::Alloc(iItems*sizeof(WCHAR));
@@ -2224,7 +2044,7 @@ int  _ui64toa_s( unsigned __int64 inValue, char* outBuffer, size_t inDestBufferS
 
 struct MemRange
 {
-    MemRange (ULONG64 s = NULL, size_t l = 0, MemRange * n = NULL) 
+    MemRange (ULONG64 s = (TADDR)0, size_t l = 0, MemRange * n = NULL)
         : start(s), len (l), next (n)
         {}
 
@@ -2232,7 +2052,7 @@ struct MemRange
     {
         return addr >= start && addr < start + len;
     }
-        
+
     ULONG64 start;
     size_t len;
     MemRange * next;
@@ -2250,7 +2070,7 @@ private:
     {
         list = new MemRange (s, l, list);
     }
-    
+
 public:
     StressLogMem () : list (NULL)
         {}
@@ -2271,7 +2091,7 @@ public:
     HRESULT __stdcall QueryInterface(REFIID riid, VOID** ppInterface);
     ULONG __stdcall AddRef();
     ULONG __stdcall Release();
-    
+
     // IDiaReadExeAtOffsetCallback implementation
     HRESULT __stdcall ReadExecutableAt(DWORDLONG fileOffset, DWORD cbData, DWORD* pcbData, BYTE data[]);
 
@@ -2292,7 +2112,7 @@ public:
     HRESULT __stdcall QueryInterface(REFIID riid, VOID** ppInterface);
     ULONG __stdcall AddRef();
     ULONG __stdcall Release();
-    
+
     // IDiaReadExeAtOffsetCallback implementation
     HRESULT __stdcall ReadExecutableAtRVA(DWORD relativeVirtualAddress, DWORD cbData, DWORD* pcbData, BYTE data[]);
 
@@ -2303,306 +2123,12 @@ private:
 
 #endif // !FEATURE_PAL
 
-/// X86 Context
-#define X86_SIZE_OF_80387_REGISTERS      80
-#define X86_MAXIMUM_SUPPORTED_EXTENSION     512
-
-typedef struct {
-    DWORD   ControlWord;
-    DWORD   StatusWord;
-    DWORD   TagWord;
-    DWORD   ErrorOffset;
-    DWORD   ErrorSelector;
-    DWORD   DataOffset;
-    DWORD   DataSelector;
-    BYTE    RegisterArea[X86_SIZE_OF_80387_REGISTERS];
-    DWORD   Cr0NpxState;
-} X86_FLOATING_SAVE_AREA;
-
-typedef struct {
-
-    DWORD ContextFlags;
-    DWORD   Dr0;
-    DWORD   Dr1;
-    DWORD   Dr2;
-    DWORD   Dr3;
-    DWORD   Dr6;
-    DWORD   Dr7;
-
-    X86_FLOATING_SAVE_AREA FloatSave;
-
-    DWORD   SegGs;
-    DWORD   SegFs;
-    DWORD   SegEs;
-    DWORD   SegDs;
-
-    DWORD   Edi;
-    DWORD   Esi;
-    DWORD   Ebx;
-    DWORD   Edx;
-    DWORD   Ecx;
-    DWORD   Eax;
-
-    DWORD   Ebp;
-    DWORD   Eip;
-    DWORD   SegCs;
-    DWORD   EFlags;
-    DWORD   Esp;
-    DWORD   SegSs;
-
-    BYTE    ExtendedRegisters[X86_MAXIMUM_SUPPORTED_EXTENSION];
-
-} X86_CONTEXT;
-
-typedef struct {
-    ULONGLONG Low;
-    LONGLONG High;
-} M128A_XPLAT;
-
-
-/// AMD64 Context
-typedef struct {
-    WORD   ControlWord;
-    WORD   StatusWord;
-    BYTE  TagWord;
-    BYTE  Reserved1;
-    WORD   ErrorOpcode;
-    DWORD ErrorOffset;
-    WORD   ErrorSelector;
-    WORD   Reserved2;
-    DWORD DataOffset;
-    WORD   DataSelector;
-    WORD   Reserved3;
-    DWORD MxCsr;
-    DWORD MxCsr_Mask;
-    M128A_XPLAT FloatRegisters[8];
-
-#if defined(_WIN64)
-    M128A_XPLAT XmmRegisters[16];
-    BYTE  Reserved4[96];
-#else
-    M128A_XPLAT XmmRegisters[8];
-    BYTE  Reserved4[220];
-
-    DWORD   Cr0NpxState;
-#endif
-
-} AMD64_XMM_SAVE_AREA32;
-
-typedef struct {
-
-    DWORD64 P1Home;
-    DWORD64 P2Home;
-    DWORD64 P3Home;
-    DWORD64 P4Home;
-    DWORD64 P5Home;
-    DWORD64 P6Home;
-
-    DWORD ContextFlags;
-    DWORD MxCsr;
-
-    WORD   SegCs;
-    WORD   SegDs;
-    WORD   SegEs;
-    WORD   SegFs;
-    WORD   SegGs;
-    WORD   SegSs;
-    DWORD EFlags;
-
-    DWORD64 Dr0;
-    DWORD64 Dr1;
-    DWORD64 Dr2;
-    DWORD64 Dr3;
-    DWORD64 Dr6;
-    DWORD64 Dr7;
-
-    DWORD64 Rax;
-    DWORD64 Rcx;
-    DWORD64 Rdx;
-    DWORD64 Rbx;
-    DWORD64 Rsp;
-    DWORD64 Rbp;
-    DWORD64 Rsi;
-    DWORD64 Rdi;
-    DWORD64 R8;
-    DWORD64 R9;
-    DWORD64 R10;
-    DWORD64 R11;
-    DWORD64 R12;
-    DWORD64 R13;
-    DWORD64 R14;
-    DWORD64 R15;
-
-    DWORD64 Rip;
-
-    union {
-        AMD64_XMM_SAVE_AREA32 FltSave;
-        struct {
-            M128A_XPLAT Header[2];
-            M128A_XPLAT Legacy[8];
-            M128A_XPLAT Xmm0;
-            M128A_XPLAT Xmm1;
-            M128A_XPLAT Xmm2;
-            M128A_XPLAT Xmm3;
-            M128A_XPLAT Xmm4;
-            M128A_XPLAT Xmm5;
-            M128A_XPLAT Xmm6;
-            M128A_XPLAT Xmm7;
-            M128A_XPLAT Xmm8;
-            M128A_XPLAT Xmm9;
-            M128A_XPLAT Xmm10;
-            M128A_XPLAT Xmm11;
-            M128A_XPLAT Xmm12;
-            M128A_XPLAT Xmm13;
-            M128A_XPLAT Xmm14;
-            M128A_XPLAT Xmm15;
-        } DUMMYSTRUCTNAME;
-    } DUMMYUNIONNAME;
-
-    M128A_XPLAT VectorRegister[26];
-    DWORD64 VectorControl;
-
-    DWORD64 DebugControl;
-    DWORD64 LastBranchToRip;
-    DWORD64 LastBranchFromRip;
-    DWORD64 LastExceptionToRip;
-    DWORD64 LastExceptionFromRip;
-
-} AMD64_CONTEXT;
-
-typedef struct{
-    __int64 LowPart;
-    __int64 HighPart;
-} FLOAT128_XPLAT;
-
-
-/// ARM Context
-#define ARM_MAX_BREAKPOINTS_CONST     8
-#define ARM_MAX_WATCHPOINTS_CONST     1
-typedef DECLSPEC_ALIGN(8) struct {
-
-    DWORD ContextFlags;
-
-    DWORD R0;
-    DWORD R1;
-    DWORD R2;
-    DWORD R3;
-    DWORD R4;
-    DWORD R5;
-    DWORD R6;
-    DWORD R7;
-    DWORD R8;
-    DWORD R9;
-    DWORD R10;
-    DWORD R11;
-    DWORD R12;
-
-    DWORD Sp;
-    DWORD Lr;
-    DWORD Pc;
-    DWORD Cpsr;
-
-    DWORD Fpscr;
-    DWORD Padding;
-    union {
-        M128A_XPLAT Q[16];
-        ULONGLONG D[32];
-        DWORD S[32];
-    } DUMMYUNIONNAME;
-
-    DWORD Bvr[ARM_MAX_BREAKPOINTS_CONST];
-    DWORD Bcr[ARM_MAX_BREAKPOINTS_CONST];
-    DWORD Wvr[ARM_MAX_WATCHPOINTS_CONST];
-    DWORD Wcr[ARM_MAX_WATCHPOINTS_CONST];
-
-    DWORD Padding2[2];
-
-} ARM_CONTEXT;
-
-// On ARM this mask is or'ed with the address of code to get an instruction pointer
-#ifndef THUMB_CODE
-#define THUMB_CODE 1
-#endif
-
-///ARM64 Context
-#define ARM64_MAX_BREAKPOINTS     8
-#define ARM64_MAX_WATCHPOINTS     2
-typedef struct {
-    
-    DWORD ContextFlags;
-    DWORD Cpsr;       // NZVF + DAIF + CurrentEL + SPSel
-    union {
-        struct {
-            DWORD64 X0;
-            DWORD64 X1;
-            DWORD64 X2;
-            DWORD64 X3;
-            DWORD64 X4;
-            DWORD64 X5;
-            DWORD64 X6;
-            DWORD64 X7;
-            DWORD64 X8;
-            DWORD64 X9;
-            DWORD64 X10;
-            DWORD64 X11;
-            DWORD64 X12;
-            DWORD64 X13;
-            DWORD64 X14;
-            DWORD64 X15;
-            DWORD64 X16;
-            DWORD64 X17;
-            DWORD64 X18;
-            DWORD64 X19;
-            DWORD64 X20;
-            DWORD64 X21;
-            DWORD64 X22;
-            DWORD64 X23;
-            DWORD64 X24;
-            DWORD64 X25;
-            DWORD64 X26;
-            DWORD64 X27;
-            DWORD64 X28;
-       };
-
-       DWORD64 X[29];
-   };
-
-   DWORD64 Fp;
-   DWORD64 Lr;
-   DWORD64 Sp;
-   DWORD64 Pc;
-
-
-   M128A_XPLAT V[32];
-   DWORD Fpcr;
-   DWORD Fpsr;
-
-   DWORD Bcr[ARM64_MAX_BREAKPOINTS];
-   DWORD64 Bvr[ARM64_MAX_BREAKPOINTS];
-   DWORD Wcr[ARM64_MAX_WATCHPOINTS];
-   DWORD64 Wvr[ARM64_MAX_WATCHPOINTS];
-
-} ARM64_CONTEXT;
-
-typedef struct _CROSS_PLATFORM_CONTEXT {
-
-    _CROSS_PLATFORM_CONTEXT() {}
-
-    union {
-        X86_CONTEXT       X86Context;
-        AMD64_CONTEXT     Amd64Context;
-        ARM_CONTEXT       ArmContext;
-        ARM64_CONTEXT     Arm64Context;
-    };
-
-} CROSS_PLATFORM_CONTEXT, *PCROSS_PLATFORM_CONTEXT;
-
-
-
 WString BuildRegisterOutput(const SOSStackRefData &ref, bool printObj = true);
-WString MethodNameFromIP(CLRDATA_ADDRESS methodDesc, BOOL bSuppressLines = FALSE, BOOL bAssemblyName = FALSE, BOOL bDisplacement = FALSE);
+WString MethodNameFromIP(CLRDATA_ADDRESS methodDesc, BOOL bSuppressLines = FALSE, BOOL bAssemblyName = FALSE, BOOL bDisplacement = FALSE, BOOL bAdjustIPForLineNumber = FALSE);
 HRESULT GetGCRefs(ULONG osID, SOSStackRefData **ppRefs, unsigned int *pRefCnt, SOSStackRefError **ppErrors, unsigned int *pErrCount);
 WString GetFrameFromAddress(TADDR frameAddr, IXCLRDataStackWalk *pStackwalk = NULL, BOOL bAssemblyName = FALSE);
+
+HRESULT PreferCanonMTOverEEClass(CLRDATA_ADDRESS eeClassPtr, BOOL *preferCanonMT, CLRDATA_ADDRESS *outCanonMT = NULL);
 
 /* This cache is used to read data from the target process if the reads are known
  * to be sequential.
@@ -2646,7 +2172,7 @@ public:
 
         // If MoveToPage succeeds, we MUST be on the right page.
         _ASSERTE(addr >= mCurrPageStart);
-        
+
         // However, the amount of data requested may fall off of the page.  In that case,
         // fall back to MisalignedRead.
         TADDR offset = addr - mCurrPageStart;
@@ -2669,7 +2195,7 @@ public:
         {
             if (size <= mCurrPageSize)
                 return;
-            
+
             // Total bytes to read, don't overflow buffer.
             unsigned int total = size + mCurrPageSize;
             if (total + mCurrPageSize > mPageSize)
@@ -2691,7 +2217,7 @@ public:
             MoveToPage(start, size);
         }
     }
-    
+
     void ClearStats()
     {
 #ifdef _DEBUG
@@ -2700,12 +2226,12 @@ public:
         mMisaligned = 0;
 #endif
     }
-    
+
     void PrintStats(const char *func)
     {
 #ifdef _DEBUG
         char buffer[1024];
-        sprintf_s(buffer, _countof(buffer), "Cache (%s): %d reads (%2.1f%% hits), %d misses (%2.1f%%), %d misaligned (%2.1f%%).\n",
+        sprintf_s(buffer, ARRAY_SIZE(buffer), "Cache (%s): %d reads (%2.1f%% hits), %d misses (%2.1f%%), %d misaligned (%2.1f%%).\n",
                                              func, mReads, 100*(mReads-mMisses)/(float)(mReads+mMisaligned), mMisses,
                                              100*mMisses/(float)(mReads+mMisaligned), mMisaligned, 100*mMisaligned/(float)(mReads+mMisaligned));
         OutputDebugStringA(buffer);
@@ -2718,8 +2244,8 @@ private:
      */
     bool MoveToPage(TADDR addr, unsigned int size = 0x18);
 
-    /* Attempts to read from the target process if the data is possibly hanging off
-     * the end of a page.
+    /* Attempts to read from the target process if the data possibly crosses the
+     * boundaries of the page.
      */
     template<class T>
     inline bool MisalignedRead(TADDR addr, T *t)
@@ -2738,338 +2264,8 @@ private:
     TADDR mCurrPageStart;
     ULONG mPageSize, mCurrPageSize;
     BYTE *mPage;
-    
+
     int mMisses, mReads, mMisaligned;
-};
-
-
-///////////////////////////////////////////////////////////////////////////////////////////
-//
-// Methods for creating a database out of the gc heap and it's roots in xml format or CLRProfiler format
-//
-
-#include <unordered_map>
-#include <unordered_set>
-#include <list>
-
-class TypeTree;
-enum { FORMAT_XML=0, FORMAT_CLRPROFILER=1 };
-enum { TYPE_START=0,TYPE_TYPES=1,TYPE_ROOTS=2,TYPE_OBJECTS=3,TYPE_HIGHEST=4};
-class HeapTraverser
-{
-private:
-    TypeTree *m_pTypeTree;
-    size_t m_curNID;
-    FILE *m_file;
-    int m_format; // from the enum above
-    size_t m_objVisited; // for UI updates
-    bool m_verify;
-    LinearReadCache mCache;
-    
-    std::unordered_map<TADDR, std::list<TADDR>> mDependentHandleMap;
-    
-public:           
-    HeapTraverser(bool verify);
-    ~HeapTraverser();
-
-    FILE *getFile() { return m_file; }
-
-    BOOL Initialize();
-    BOOL CreateReport (FILE *fp, int format);
-
-private:    
-    // First all types are added to a tree
-    void insert(size_t mTable);
-    size_t getID(size_t mTable);    
-    
-    // Functions for writing to the output file.
-    void PrintType(size_t ID,LPCWSTR name);
-
-    void PrintObjectHead(size_t objAddr,size_t typeID,size_t Size);
-    void PrintObjectMember(size_t memberValue, bool dependentHandle);
-    void PrintLoaderAllocator(size_t memberValue);
-    void PrintObjectTail();
-
-    void PrintRootHead();
-    void PrintRoot(LPCWSTR kind,size_t Value);
-    void PrintRootTail();
-    
-    void PrintSection(int Type,BOOL bOpening);
-
-    // Root and object member helper functions
-    void FindGCRootOnStacks();
-    void PrintRefs(size_t obj, size_t methodTable, size_t size);
-    
-    // Callback functions used during traversals
-    static void GatherTypes(DWORD_PTR objAddr,size_t Size,DWORD_PTR methodTable, LPVOID token);
-    static void PrintHeap(DWORD_PTR objAddr,size_t Size,DWORD_PTR methodTable, LPVOID token);
-    static void PrintOutTree(size_t methodTable, size_t ID, LPVOID token);
-    void TraceHandles();
-};
-
-
-class GCRootImpl
-{
-private:
-    struct MTInfo
-    {
-        TADDR MethodTable;
-        WCHAR  *TypeName;
-
-        TADDR *Buffer;
-        CGCDesc *GCDesc;
-
-        TADDR LoaderAllocatorObjectHandle;
-        bool ArrayOfVC;
-        bool ContainsPointers;
-        bool Collectible;
-        size_t BaseSize;
-        size_t ComponentSize;
-        
-        const WCHAR *GetTypeName()
-        {
-            if (!TypeName)
-                TypeName = CreateMethodTableName(MethodTable);
-            
-            if (!TypeName)
-                return W("<error>");
-            
-            return TypeName;
-        }
-
-        MTInfo()
-            : MethodTable(0), TypeName(0), Buffer(0), GCDesc(0),
-              ArrayOfVC(false), ContainsPointers(false), Collectible(false), BaseSize(0), ComponentSize(0)
-        {
-        }
-
-        ~MTInfo()
-        {
-            if (Buffer)
-                delete [] Buffer;
-
-            if (TypeName)
-                delete [] TypeName;
-        }
-    };
-
-    struct RootNode
-    {
-        RootNode *Next;
-        RootNode *Prev;
-        TADDR Object;
-        MTInfo *MTInfo;
-
-        bool FilledRefs;
-        bool FromDependentHandle;
-        RootNode *GCRefs;
-        
-        
-        const WCHAR *GetTypeName()
-        {
-            if (!MTInfo)
-                return W("<unknown>");
-                
-            return MTInfo->GetTypeName();
-        }
-
-        RootNode()
-            : Next(0), Prev(0)
-        {
-            Clear();
-        }
-
-        void Clear()
-        {
-            if (Next && Next->Prev == this)
-                Next->Prev = NULL;
-
-            if (Prev && Prev->Next == this)
-                Prev->Next = NULL;
-
-            Next = 0;
-            Prev = 0;
-            Object = 0;
-            MTInfo = 0;
-            FilledRefs = false;
-            FromDependentHandle = false;
-            GCRefs = 0;
-        }
-        
-        void Remove(RootNode *&list)
-        {
-            RootNode *curr_next = Next;
-            
-            // We've already considered this object, remove it.
-            if (Prev == NULL)
-            {
-                // If we've filtered out the head, update it.
-                list = curr_next;
-
-                if (curr_next)
-                    curr_next->Prev = NULL;
-            }
-            else
-            {
-                // Otherwise remove the current item from the list
-                Prev->Next = curr_next;
-
-                if (curr_next)
-                    curr_next->Prev = Prev;
-            }
-        }
-    };
-
-public:
-    static void GetDependentHandleMap(std::unordered_map<TADDR, std::list<TADDR>> &map);
-
-public:
-    // Finds all objects which root "target" and prints the path from the root
-    // to "target".  If all is true, all possible paths to the object are printed.
-    // If all is false, only completely unique paths will be printed.
-    int PrintRootsForObject(TADDR obj, bool all, bool noStacks);
-
-    // Finds a path from root to target if it exists and prints it out.  Returns
-    // true if it found a path, false otherwise.
-    bool PrintPathToObject(TADDR root, TADDR target);
-
-    // Calculates the size of the closure of objects kept alive by root.
-    size_t ObjSize(TADDR root);
-
-    // Walks each root, printing out the total amount of memory held alive by it.
-    void ObjSize();
-
-    // Returns the set of all live objects in the process.
-    const std::unordered_set<TADDR> &GetLiveObjects(bool excludeFQ = false);
-
-    // See !FindRoots.
-    int FindRoots(int gen, TADDR target);
-
-private:
-    // typedefs
-    typedef void (*ReportCallback)(TADDR root, RootNode *path, bool printHeader);
-
-    // Book keeping and debug.
-    void ClearAll();
-    void ClearNodes();
-    void ClearSizeData();
-
-    // Printing roots
-    int PrintRootsOnHandleTable(int gen = -1);
-    int PrintRootsOnAllThreads();
-    int PrintRootsOnThread(DWORD osThreadId);
-    int PrintRootsOnFQ(bool notReadyForFinalization = false);
-    int PrintRootsInOlderGen();
-    int PrintRootsInRange(LinearReadCache &cache, TADDR start, TADDR stop, ReportCallback func, bool printHeader);
-
-    // Calculate gc root
-    RootNode *FilterRoots(RootNode *&list);
-    RootNode *FindPathToTarget(TADDR root);
-    RootNode *GetGCRefs(RootNode *path, RootNode *node);
-    
-    void InitDependentHandleMap();
-
-    //Reporting:
-    void ReportOneHandlePath(const SOSHandleData &handle, RootNode *node, bool printHeader);
-    void ReportOnePath(DWORD thread, const SOSStackRefData &stackRef, RootNode *node, bool printThread, bool printFrame);
-    static void ReportOneFQEntry(TADDR root, RootNode *path, bool printHeader);
-    static void ReportOlderGenEntry(TADDR root, RootNode *path, bool printHeader);
-    void ReportSizeInfo(const SOSHandleData &handle, TADDR obj);
-    void ReportSizeInfo(DWORD thread, const SOSStackRefData &ref, TADDR obj);
-
-    // Data reads:
-    TADDR ReadPointer(TADDR location);
-    TADDR ReadPointerCached(TADDR location);
-
-    // Object/MT data:
-    MTInfo *GetMTInfo(TADDR mt);
-    DWORD GetComponents(TADDR obj, TADDR mt);
-    size_t GetSizeOfObject(TADDR obj, MTInfo *info);
-
-    // RootNode management:
-    RootNode *NewNode(TADDR obj = 0, MTInfo *mtinfo = 0, bool fromDependent = false);
-    void DeleteNode(RootNode *node);
-
-private:
-    
-    bool mAll,  // Print all roots or just unique roots?
-         mSize; // Print rooting information or total size info?
-
-    std::list<RootNode*> mCleanupList;  // A list of RootNode's we've newed up.  This is only used to delete all of them later.
-    std::list<RootNode*> mRootNewList;  // A list of unused RootNodes that are free to use instead of having to "new" up more.
-    
-    std::unordered_map<TADDR, MTInfo*> mMTs;     // The MethodTable cache which maps from MT -> MethodTable data (size, gcdesc, string typename)
-    std::unordered_map<TADDR, RootNode*> mTargets;   // The objects that we are searching for.
-    std::unordered_set<TADDR> mConsidered;       // A hashtable of objects we've already visited.
-    std::unordered_map<TADDR, size_t> mSizes;   // A mapping from object address to total size of data the object roots.
-    
-    std::unordered_map<TADDR, std::list<TADDR>> mDependentHandleMap;
-    
-    LinearReadCache mCache;     // A linear cache which stops us from having to read from the target process more than 1-2 times per object.
-};
-
-//
-// Helper class used for type-safe bitflags
-//   T - the enum type specifying the individual bit flags
-//   U - the underlying/storage type
-// Requirement:
-//   sizeof(T) <= sizeof(U)
-//
-template <typename T, typename U>
-struct Flags
-{
-    typedef T UnderlyingType;
-    typedef U BitFlagEnumType;
-
-    static_assert_no_msg(sizeof(BitFlagEnumType) <= sizeof(UnderlyingType));
-
-    Flags(UnderlyingType v)
-        : m_val(v)
-    { }
-
-    Flags(BitFlagEnumType v)
-        : m_val(v)
-    { }
-
-    Flags(const Flags& other)
-        : m_val(other.m_val)
-    { }
-
-    Flags& operator = (const Flags& other)
-    { m_val = other.m_val; return *this; }
-
-    Flags operator | (Flags other) const
-    { return Flags<T, U>(m_val | other._val); }
-
-    void operator |= (Flags other)
-    { m_val |= other.m_val; }
-
-    Flags operator & (Flags other) const
-    { return Flags<T, U>(m_val & other.m_val); }
-
-    void operator &= (Flags other)
-    { m_val &= other.m_val; }
-
-    Flags operator ^ (Flags other) const
-    { return Flags<T, U>(m_val ^ other._val); }
-
-    void operator ^= (Flags other)
-    { m_val ^= other.m_val; }
-
-    BOOL operator == (Flags other) const
-    { return m_val == other.m_val; }
-
-    BOOL operator != (Flags other) const
-    { return m_val != other.m_val; }
-
-
-private:
-    UnderlyingType m_val;
-};
-
-struct ImageInfo
-{
-    ULONG64 modBase;
 };
 
 // Helper class used in ClrStackFromPublicInterface() to keep track of explicit EE Frames
@@ -3095,5 +2291,44 @@ public:
 private:
     HRESULT PrintCurrentInternalFrame();
 };
+
+#undef LIMITED_METHOD_DAC_CONTRACT 
+#define LIMITED_METHOD_DAC_CONTRACT ((void)0)
+#undef LIMITED_METHOD_CONTRACT 
+#define LIMITED_METHOD_CONTRACT ((void)0)
+#undef WRAPPER_NO_CONTRACT 
+#define WRAPPER_NO_CONTRACT ((void)0)
+#undef SUPPORTS_DAC 
+#define SUPPORTS_DAC ((void)0)
+
+//////////////////////////////////////////////////////////////////////////////
+// enum CorElementTypeZapSig defines some additional internal ELEMENT_TYPE's
+// values that are only used by ZapSig signatures.
+//////////////////////////////////////////////////////////////////////////////
+typedef enum CorElementTypeZapSig
+{
+    // ZapSig encoding for ELEMENT_TYPE_VAR and ELEMENT_TYPE_MVAR. It is always followed
+    // by the RID of a GenericParam token, encoded as a compressed integer.
+    ELEMENT_TYPE_VAR_ZAPSIG = 0x3b,
+
+    // UNUSED = 0x3c,
+
+    // ZapSig encoding for native value types in IL stubs. IL stub signatures may contain
+    // ELEMENT_TYPE_INTERNAL followed by ParamTypeDesc with ELEMENT_TYPE_VALUETYPE element
+    // type. It acts like a modifier to the underlying structure making it look like its
+    // unmanaged view (size determined by unmanaged layout, blittable, no GC pointers).
+    //
+    // ELEMENT_TYPE_NATIVE_VALUETYPE_ZAPSIG is used when encoding such types to NGEN images.
+    // The signature looks like this: ET_NATIVE_VALUETYPE_ZAPSIG ET_VALUETYPE <token>.
+    // See code:ZapSig.GetSignatureForTypeHandle and code:SigPointer.GetTypeHandleThrowing
+    // where the encoding/decoding takes place.
+    ELEMENT_TYPE_NATIVE_VALUETYPE_ZAPSIG = 0x3d,
+
+    ELEMENT_TYPE_CANON_ZAPSIG            = 0x3e,     // zapsig encoding for System.__Canon
+    ELEMENT_TYPE_MODULE_ZAPSIG           = 0x3f,     // zapsig encoding for external module id#
+
+} CorElementTypeZapSig;
+
 #include "sigparser.h"
+
 #endif // __util_h__

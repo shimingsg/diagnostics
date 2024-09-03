@@ -3,19 +3,17 @@
 #
 # Commands Verified: GCWhere, GCRoot, DumpObj, DumpHeap, DumpStackObjects
 #
-# 1) load sos
-# 2) run to the first debug break
-# 3) dump stack objects to get the address of GCWhere!temp
+# 1) Run to the first debug break
+# 2) Load sos
+# 3) Dump stack objects to get the address of GCWhere!temp
 # 4) Run various commands on the address, verify Gen0
-# 5) run to the second debug break
+# 5) Run to the second debug break
 # 6) Run various commands on the address, verify Gen1
-# 7) run to the third debug break
+# 7) Run to the third debug break
 # 8) Run various commands on the address, verify Gen2
-# 9) run to the fourth debug break
+# 9) Run to the fourth debug break
 #10) Run various commands on the address, verify it is still Gen2
-#11) let the program run to completion
-
-LOADSOS
+#11) Let the program run to completion
 
 # Continue to the DebugBreak
 CONTINUE
@@ -23,41 +21,39 @@ IFDEF:CDB
 VERIFY:Break instruction exception - code 80000003
 ENDIF:CDB
 
+LOADSOS
+
 SOSCOMMAND:DumpStackObjects
-VERIFY:<HEXVAL>\s+<HEXVAL>\s+System.IO.StringWriter\s+
+VERIFY:\s*<HEXVAL>\s+<HEXVAL>\s+System.IO.StringWriter\s+
 
 SOSCOMMAND:DumpObj <POUT>\w+\s+(<HEXVAL>)\s+(System.IO.StringWriter!\$0_)*System.IO.StringWriter\s+<POUT>
-IFDEF:MAJOR_RUNTIME_VERSION_1
-VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+System\.IO.TextWriter\s+<DECVAL>\s+shared\s+static\s+Null\s+
-VERIFY:\s+>>\s+Domain:Value\s+<HEXVAL>:(<HEXVAL>|NotInit)\s+<<\s+
-ENDIF:MAJOR_RUNTIME_VERSION_1
 IFDEF:MAJOR_RUNTIME_VERSION_2
 VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+System\.IO.TextWriter\s+<DECVAL>\s+shared\s+static\s+Null\s+
-VERIFY:\s+>>\s+Domain:Value\s+<HEXVAL>:<HEXVAL>\s+<<\s+
+VERIFY:\s+>>\s+Domain:Value\s+<HEXVAL>:(<HEXVAL>|NotInit)\s+<<\s+
 ENDIF:MAJOR_RUNTIME_VERSION_2
-IFDEF:MAJOR_RUNTIME_VERSION_3
+IFDEF:MAJOR_RUNTIME_VERSION_GE_3
 VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+System\.IO.TextWriter\s+<DECVAL>\s+static\s+<HEXVAL>\s+Null\s+
-ENDIF:MAJOR_RUNTIME_VERSION_3
+ENDIF:MAJOR_RUNTIME_VERSION_GE_3
 
 SOSCOMMAND:DumpStackObjects
-VERIFY:<HEXVAL>\s<HEXVAL>\s([Gg][Cc]where!\$0_)*GCWhere\s+
+VERIFY:\s*<HEXVAL>\s+<HEXVAL>\s+([Gg][Cc]where!\$0_)*GCWhere\s+
 
 SOSCOMMAND:GCWhere <POUT>\w+\s+(<HEXVAL>)\s+([Gg][Cc]where!\$0_)*GCWhere\s+<POUT>
 # we care that the Gen is 0
-VERIFY:<HEXVAL>\s+0\s+\d\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+0x<HEXVAL>\s*\(\d+\)
+VERIFY:\s*<HEXVAL>\s+<DECVAL>\s+<HEXVAL>\s+0.*
 
 SOSCOMMAND:GCRoot <PREVPOUT>
 VERIFY:.*Thread <HEXVAL>:
-VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+GCWhere\.Main\(\)\s+\[.*[Gg][Cc][Ww]here\.cs\s+@\s+39\]\s+
+VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+GCWhere\.Main\(\)\s+
 
-SOSCOMMAND:GCRoot -all <PREVPOUT>
+SOSCOMMAND:GCRoot <PREVPOUT>
 VERIFY:.*Thread <HEXVAL>:
-VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+GCWhere\.Main\(\)\s+\[.*[Gg][Cc][Ww]here\.cs\s+@\s+39\]\s+
+VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+GCWhere\.Main\(\)\s+
 
 SOSCOMMAND:DumpObj <PREVPOUT>
 VERIFY:\s*Name:\s+GCWhere\s+
 VERIFY:\s+MethodTable:\s+<HEXVAL>\s+
-VERIFY:\s+EEClass:\s+<HEXVAL>\s+
+VERIFY:\s+(EEClass|Canonical MethodTable):\s+<HEXVAL>\s+
 VERIFY:\s+Fields:\s+
 VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+System\.String.*_string\s+
 VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+System\.UInt64.*52704621242434 _static\s+
@@ -65,18 +61,18 @@ VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+System\.UInt64.*52704621242434 _stati
 SOSCOMMAND:DumpObj -nofields <PREVPOUT>
 VERIFY:\s*Name:\s+GCWhere\s+
 VERIFY:\s+MethodTable:\s+<HEXVAL>\s+
-VERIFY:\s+EEClass:\s+<HEXVAL>\s+
+VERIFY:\s+(EEClass|Canonical MethodTable):\s+<HEXVAL>\s+
 
 SOSCOMMAND:DumpObj -refs <PREVPOUT>
 VERIFY:\s*Name:\s+GCWhere\s+
 VERIFY:\s+MethodTable:\s+<HEXVAL>\s+
-VERIFY:\s+EEClass:\s+<HEXVAL>\s+
+VERIFY:\s+(EEClass|Canonical MethodTable):\s+<HEXVAL>\s+
 VERIFY:\s+Fields:\s+
 VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+System\.String.*_string\s+
 VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+System\.UInt64.*52704621242434 _static\s+
 VERIFY:\s+GC Refs:\s+
-VERIFY:\s+offset\s+object\s+
-VERIFY:\s+<DECVAL>\s+<HEXVAL>\s+
+VERIFY:\s+Field\s+Offset\s+Object\s+Type\s+
+VERIFY:.*\s+<HEXVAL>\s+<HEXVAL>.*
 
 SOSCOMMAND:DumpHeap
 VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+<DECVAL>\s+
@@ -85,6 +81,16 @@ SOSCOMMAND:DumpHeap -stat
 VERIFY:\s*Statistics:\s+
 VERIFY:\s+MT\s+Count\s+TotalSize\s+Class\s+Name\s+
 VERIFY:\s+<HEXVAL>\s+<DECVAL>\s+<DECVAL>\s+GCWhere\s+
+
+SOSCOMMAND:DumpHeap -stat -gen gen0
+VERIFY:\s*Statistics:\s+
+VERIFY:\s+MT\s+Count\s+TotalSize\s+Class\s+Name\s+
+VERIFY:\s+<HEXVAL>\s+<DECVAL>\s+<DECVAL>\s+GCWhere\s+
+
+IFDEF:WINDOWS
+SOSCOMMAND:DumpHeap -stat -gen xxx
+VERIFY:\s*Unknown generation: xxx\. Only gen0, gen1, gen2, loh \(large\), poh \(pinned\) and foh \(frozen\) are supported\s+
+ENDIF:WINDOWS
 
 IFDEF:WINDOWS
 SOSCOMMAND:DumpHeap -strings
@@ -97,16 +103,13 @@ VERIFY:\s+System Domain:\s+<HEXVAL>\s+
 VERIFY:\s+LowFrequencyHeap:\s+<HEXVAL>.*bytes.*\s+
 VERIFY:\s+HighFrequencyHeap:\s+<HEXVAL>.*bytes.*\s+
 VERIFY:\s+Total size:\s+Size:\s+0x<HEXVAL>\s+\(<DECVAL>|lu\)\s+bytes\.\s+
-VERIFY:\s+Jit code heap:\s+
-VERIFY:\s+LoaderCodeHeap:\s+<HEXVAL>.*bytes\.\s+
-VERIFY:\s+Total LoaderHeap size:\s+Size:\s+0x<HEXVAL>\s+\(<DECVAL>|lu\)\s+bytes\.\s+
+VERIFY:\s+JIT Manager:\s+<HEXVAL>
+VERIFY:\s+(LoaderCodeHeap|HostCodeHeap):\s+<HEXVAL>.*bytes.*
+VERIFY:\s+Total size:\s+Size:\s+0x<HEXVAL>\s+\(<DECVAL>|lu\)\s+bytes\.\s+
 VERIFY:\s+Number of GC Heaps:\s+<DECVAL>\s+
-VERIFY:\s+generation\s+<DECVAL>\s+starts\s+at\s+0x<HEXVAL>\s+
-VERIFY:\s+generation\s+<DECVAL>\s+starts\s+at\s+0x<HEXVAL>\s+
-VERIFY:\s+generation\s+<DECVAL>\s+starts\s+at\s+0x<HEXVAL>\s+
-VERIFY:\s+segment\s+begin\s+allocated\s+size\s+
-VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+0x<HEXVAL>\(<DECVAL>\)
-VERIFY:\s+Large object heap starts at 0x<HEXVAL>\s+
+VERIFY:\s+segment\s+begin\s+allocated\s+committed\s+allocated\s+size\s+committed\s+size\s+
+VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+0x<HEXVAL>\s*\(<DECVAL>\)\s+0x<HEXVAL>\s*\(<DECVAL>\)\s+
+VERIFY:\s+Large object heap.*
 
 # Continue to the next DebugBreak
 CONTINUE
@@ -117,20 +120,20 @@ ENDIF:CDB
 SOSCOMMAND:DumpStackObjects
 SOSCOMMAND:GCWhere <POUT>\w+\s+(<HEXVAL>)\s+([Gg][Cc]where!\$0_)*GCWhere\s+<POUT>
 # we care that the Gen is 1
-VERIFY:<HEXVAL>\s+1\s+\d\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+0x<HEXVAL>\s*\(\d+\)
+VERIFY:\s*<HEXVAL>\s+<DECVAL>\s+<HEXVAL>\s+1.*
 
 SOSCOMMAND:GCRoot <PREVPOUT>
 VERIFY:.*Thread <HEXVAL>:
-VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+GCWhere\.Main\(\)\s+\[.*[/|\\][Gg][Cc][Ww]here\.cs\s+@\s+42\]\s+
+VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+GCWhere\.Main\(\)\s+
 
-SOSCOMMAND:GCRoot -all <PREVPOUT>
+SOSCOMMAND:GCRoot <PREVPOUT>
 VERIFY:.*Thread <HEXVAL>:
-VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+GCWhere\.Main\(\)\s+\[.*[Gg][Cc][Ww]here\.cs\s+@\s+42\]\s+
+VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+GCWhere\.Main\(\)\s+
 
 SOSCOMMAND:DumpObj <PREVPOUT>
 VERIFY:\s*Name:\s+GCWhere\s+
 VERIFY:\s+MethodTable:\s+<HEXVAL>\s+
-VERIFY:\s+EEClass:\s+<HEXVAL>\s+
+VERIFY:\s+(EEClass|Canonical MethodTable):\s+<HEXVAL>\s+
 VERIFY:\s+Fields:\s+
 VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+System\.String.*_string\s+
 VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+System\.UInt64.*52704621242434 _static\s+
@@ -138,18 +141,18 @@ VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+System\.UInt64.*52704621242434 _stati
 SOSCOMMAND:DumpObj -nofields <PREVPOUT>
 VERIFY:\s*Name:\s+GCWhere\s+
 VERIFY:\s+MethodTable:\s+<HEXVAL>\s+
-VERIFY:\s+EEClass:\s+<HEXVAL>\s+
+VERIFY:\s+(EEClass|Canonical MethodTable):\s+<HEXVAL>\s+
 
 SOSCOMMAND:DumpObj -refs <PREVPOUT>
 VERIFY:\s*Name:\s+GCWhere\s+
 VERIFY:\s+MethodTable:\s+<HEXVAL>\s+
-VERIFY:\s+EEClass:\s+<HEXVAL>\s+
+VERIFY:\s+(EEClass|Canonical MethodTable):\s+<HEXVAL>\s+
 VERIFY:\s+Fields:\s+
 VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+System\.String.*_string\s+
 VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+System\.UInt64.*52704621242434 _static\s+
 VERIFY:\s+GC Refs:\s+
-VERIFY:\s+offset\s+object\s+
-VERIFY:\s+<DECVAL>\s+<HEXVAL>\s+
+VERIFY:\s+Field\s+Offset\s+Object\s+Type\s+
+VERIFY:.*\s+<HEXVAL>\s+<HEXVAL>.*
 
 # Continue to the next DebugBreak
 CONTINUE
@@ -158,14 +161,21 @@ VERIFY:Break instruction exception - code 80000003
 ENDIF:CDB
 
 SOSCOMMAND:EEHeap -gc
+
+# DumpStackObjects does not work here on 6.0 MacOS
+# https://github.com/dotnet/diagnostics/issues/1950
+!IFDEF:OSX
+
 SOSCOMMAND:DumpStackObjects
 SOSCOMMAND:GCWhere <POUT>\w+\s+(<HEXVAL>)\s+([Gg][Cc]where!\$0_)*GCWhere\s+<POUT>
 # we care that the Gen is 2
-VERIFY:<HEXVAL>\s+2\s+\d\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+0x<HEXVAL>\s*\(\d+\)
+VERIFY:\s*<HEXVAL>\s+<DECVAL>\s+<HEXVAL>\s+2.*
 
 SOSCOMMAND:GCRoot <PREVPOUT>
 VERIFY:.*Thread <HEXVAL>:
-VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+GCWhere\.Main\(\)\s+\[.*[/|\\][Gg][Cc][Ww]here\.cs\s+@\s+45\]\s+
+VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+GCWhere\.Main\(\)\s+
+
+ENDIF:OSX
 
 # Continue to the next DebugBreak
 CONTINUE
@@ -174,14 +184,21 @@ VERIFY:Break instruction exception - code 80000003
 ENDIF:CDB
 
 SOSCOMMAND:EEHeap -gc
+
+# DumpStackObjects does not work here on 6.0 MacOS
+# https://github.com/dotnet/diagnostics/issues/1950
+!IFDEF:OSX
+
 SOSCOMMAND:DumpStackObjects
 SOSCOMMAND:GCWhere <POUT>\w+\s+(<HEXVAL>)\s+([Gg][Cc]where!\$0_)*GCWhere\s+<POUT>
-# we care that the Gen is still 2 or 0 on Windows 3.x 
-VERIFY:<HEXVAL>\s+[02]\s+\d\s+<HEXVAL>\s+<HEXVAL>\s+<HEXVAL>\s+0x<HEXVAL>\s*\(\d+\)
+# we care that the Gen is still 2 or 0 on Windows 3.x
+VERIFY:\s*<HEXVAL>\s+<DECVAL>\s+<HEXVAL>\s+[02].*
 
 SOSCOMMAND:GCRoot <PREVPOUT>
 VERIFY:.*Thread <HEXVAL>:
-VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+GCWhere\.Main\(\)\s+\[.*[/|\\][Gg][Cc][Ww]here\.cs\s+@\s+49\]\s+
+VERIFY:\s+<HEXVAL>\s+<HEXVAL>\s+GCWhere\.Main\(\)\s+
+
+ENDIF:OSX
 
 # Continue to the next DebugBreak
 CONTINUE

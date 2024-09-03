@@ -1,15 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netcoreapp3.0</TargetFramework>
+    <TargetFramework>net6.0</TargetFramework>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="../../Tools/dotnet-counters/dotnet-counters.csproj" />
+    <ProjectReference Include="../../Microsoft.Diagnostics.TestHelpers/Microsoft.Diagnostics.TestHelpers.csproj" />
+    <ProjectReference Include="../CommonTestRunner/CommonTestRunner.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="NewtonSoft.Json" Version="12.0.2" />
+    <PackageReference Include="NewtonSoft.Json" Version="$(NewtonSoftJsonVersion)" />
   </ItemGroup>
 
 </Project>

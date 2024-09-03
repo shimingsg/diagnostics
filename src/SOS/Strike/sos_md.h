@@ -1,6 +1,5 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 // ==++==
 // 
@@ -68,7 +67,7 @@ typedef enum
 }
 PPFormatFlags;
 
-char* asString(CQuickBytes *out);
+static char* asString(CQuickBytes *out);
 
 PCCOR_SIGNATURE PrettyPrintType(
     PCCOR_SIGNATURE typePtr,            // type to convert,     
@@ -98,4 +97,3 @@ void PrettyPrintClassFromToken(
     DWORD formatFlags = FormatCSharp);  // the format flags for the types
 
 #endif
-

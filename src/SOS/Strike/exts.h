@@ -1,6 +1,5 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 // ==++==
 // 
@@ -15,13 +14,8 @@
 #include <windows.h>
 #include <winternl.h>
 
-#if defined(_MSC_VER)
-#pragma warning(disable:4245)   // signed/unsigned mismatch
-#pragma warning(disable:4100)   // unreferenced formal parameter
-#pragma warning(disable:4201)   // nonstandard extension used : nameless struct/union
-#pragma warning(disable:4127)   // conditional expression is constant
-#pragma warning(disable:4430)   // missing type specifier: C++ doesn't support default-int
-#endif
+#undef CreateProcess
+
 #include "strike.h"
 #include <wdbgexts.h>
 #include <dbgeng.h>
@@ -36,6 +30,10 @@
 #undef StackTrace
 #endif
 
+#ifndef FEATURE_PAL
+#include "dbgengservices.h"
+#endif
+
 #include "platformspecific.h"
 
 // We need to define the target address type.  This has to be used in the
@@ -48,22 +46,22 @@
 #define TO_TADDR(cdaddr) ((TADDR)(cdaddr))
 #define TO_CDADDR(taddr) ((CLRDATA_ADDRESS)(LONG_PTR)(taddr))
 
-// We also need a "correction" macro: there are a number of places in the DAC
-// where instead of using the CLRDATA_ADDRESS sign-extension convention
-// we 0-extend (most notably DacpGcHeapDetails)
-#define NEED_DAC_CLRDATA_ADDRESS_CORRECTION 1
-#if NEED_DAC_CLRDATA_ADDRESS_CORRECTION == 1
-    // the macro below "corrects" a CDADDR to always represent the
-    // sign-extended equivalent ULONG64 value of the original TADDR
-    #define UL64_TO_CDA(ul64) (TO_CDADDR(TO_TADDR(ul64)))
-#else
-    #define UL64_TO_CDA(ul64) (ul64)
-#endif // NEED_DAC_CLRDATA_ADDRESS_CORRECTION 1
+// the macro below "corrects" a CDADDR to always represent the
+// sign-extended equivalent ULONG64 value of the original TADDR
+#define UL64_TO_CDA(ul64) (TO_CDADDR(TO_TADDR(ul64)))
 
 // The macro below removes the sign extension, returning the  
 // equivalent ULONG64 value to the original TADDR. Useful when 
 // printing CDA values.
 #define CDA_TO_UL64(cda) ((ULONG64)(TO_TADDR(cda)))
+
+#ifndef IMAGE_FILE_MACHINE_RISCV64
+#define IMAGE_FILE_MACHINE_RISCV64        0x5064  // RISCV64
+#endif // !IMAGE_FILE_MACHINE_RISCV64
+
+#ifndef IMAGE_FILE_MACHINE_LOONGARCH64
+#define IMAGE_FILE_MACHINE_LOONGARCH64        0x6264  // LOONGARCH64
+#endif // !IMAGE_FILE_MACHINE_LOONGARCH64
 
 typedef struct _TADDR_RANGE
 {
@@ -78,6 +76,7 @@ typedef struct _TADDR_SEGINFO
     TADDR end;
 } TADDR_SEGINFO;
 
+#include "sosextensions.h"
 #include "util.h"
 
 #ifdef __cplusplus
@@ -123,10 +122,6 @@ private:
     static OnUnloadTask *s_pUnloadTaskList;
 };
 
-#ifndef MINIDUMP
- 
-#define EXIT_API     ExtRelease
-
 // Safe release and NULL.
 #define EXT_RELEASE(Unk) \
     ((Unk) != NULL ? ((Unk)->Release(), (Unk) = NULL) : NULL)
@@ -152,6 +147,7 @@ IsInitializedByDbgEng();
 
 extern ILLDBServices*        g_ExtServices;    
 extern ILLDBServices2*       g_ExtServices2;    
+extern BOOL InitializePAL();
 
 #define IsInitializedByDbgEng() false
 
@@ -160,11 +156,26 @@ extern ILLDBServices2*       g_ExtServices2;
 HRESULT
 ExtQuery(PDEBUG_CLIENT client);
 
+HRESULT
+ExtInit(PDEBUG_CLIENT client);
+
 HRESULT 
 ArchQuery(void);
 
 void
 ExtRelease(void);
+
+HRESULT 
+ExecuteCommand(PCSTR commandName, PCSTR args);
+
+void 
+EENotLoadedMessage(HRESULT Status);
+
+void 
+DACMessage(HRESULT Status);
+
+IXCLRDataProcess*
+GetClrDataFromDbgEng();
 
 extern BOOL ControlC;
 
@@ -172,10 +183,9 @@ inline BOOL IsInterrupt()
 {
     if (!ControlC && g_ExtControl->GetInterrupt() == S_OK)
     {
-        ExtOut("Command cancelled at the user's request.\n");
+        ExtOut("Command canceled at the user's request.\n");
         ControlC = TRUE;
     }
-
     return ControlC;
 }
 
@@ -194,64 +204,24 @@ public:
     ~__ExtensionCleanUp(){ExtRelease();}
 };
 
-inline void EENotLoadedMessage(HRESULT Status)
-{
-    ExtOut("Failed to find runtime module (%s), 0x%08x\n", MAKEDLLNAME_A("coreclr"), Status);
-    ExtOut("Extension commands need it in order to have something to do.\n");
-}
-
-inline void DACMessage(HRESULT Status)
-{
-    ExtOut("Failed to load data access module, 0x%08x\n", Status);
-#ifndef FEATURE_PAL
-    ExtOut("Verify that 1) you have a recent build of the debugger (6.2.14 or newer)\n");
-    ExtOut("            2) the file mscordaccore.dll that matches your version of coreclr.dll is\n");
-    ExtOut("                in the version directory or on the symbol path\n");
-    ExtOut("            3) or, if you are debugging a dump file, verify that the file \n");
-    ExtOut("                mscordaccore_<arch>_<arch>_<version>.dll is on your symbol path.\n");
-    ExtOut("            4) you are debugging on supported cross platform architecture as \n");
-    ExtOut("                the dump file. For example, an ARM dump file must be debugged\n");
-    ExtOut("                on an X86 or an ARM machine; an AMD64 dump file must be\n");
-    ExtOut("                debugged on an AMD64 machine.\n");
-    ExtOut("\n");
-    ExtOut("You can also run the debugger command .cordll to control the debugger's\n");
-    ExtOut("load of mscordaccore.dll.  .cordll -ve -u -l will do a verbose reload.\n");
-    ExtOut("If that succeeds, the SOS command should work on retry.\n");
-    ExtOut("\n");
-    ExtOut("If you are debugging a minidump, you need to make sure that your executable\n");
-    ExtOut("path is pointing to coreclr.dll as well.\n");
-#else // FEATURE_PAL
-    if (Status == CORDBG_E_MISSING_DEBUGGER_EXPORTS)
-    {
-        ExtOut("You can run the debugger command 'setclrpath' to control the load of %s.\n", MAKEDLLNAME_A("mscordaccore"));
-        ExtOut("If that succeeds, the SOS command should work on retry.\n");
-    }
-    else
-    {
-        ExtOut("Can not load or initialize %s. The target runtime may not be initialized.\n", MAKEDLLNAME_A("mscordaccore"));
-    }
-#endif // FEATURE_PAL
-}
-
-HRESULT CheckEEDll();
-
 // The minimum initialization for a command
 #define INIT_API_EXT()                                          \
     HRESULT Status;                                             \
     __ExtensionCleanUp __extensionCleanUp;                      \
-    if ((Status = ExtQuery(client)) != S_OK) return Status;     \
-    ControlC = FALSE;                                           \
-    g_bDacBroken = TRUE;                                        \
-    g_clrData = NULL;                                           \
-    g_sos = NULL;                                        
+    if ((Status = ExtInit(client)) != S_OK) return Status;
 
 // Also initializes the target machine
 #define INIT_API_NOEE()                                         \
     INIT_API_EXT()                                              \
     if ((Status = ArchQuery()) != S_OK) return Status;
 
+#define INIT_API_NOEE_PROBE_MANAGED(name)                       \
+    INIT_API_EXT()                                              \
+    if ((Status = ExecuteCommand(name, args)) != E_NOTIMPL) return Status; \
+    if ((Status = ArchQuery()) != S_OK) return Status;
+
 #define INIT_API_EE()                                           \
-    if ((Status = CheckEEDll()) != S_OK)                        \
+    if ((Status = GetRuntime(&g_pRuntime)) != S_OK)             \
     {                                                           \
         EENotLoadedMessage(Status);                             \
         return Status;                                          \
@@ -259,6 +229,10 @@ HRESULT CheckEEDll();
 
 #define INIT_API_NODAC()                                        \
     INIT_API_NOEE()                                             \
+    INIT_API_EE()
+
+#define INIT_API_NODAC_PROBE_MANAGED(name)                      \
+    INIT_API_NOEE_PROBE_MANAGED(name)                           \
     INIT_API_EE()
 
 #define INIT_API_DAC()                                          \
@@ -274,7 +248,15 @@ HRESULT CheckEEDll();
     ToRelease<ISOSDacInterface> spISD(g_sos);                   \
     ResetGlobals();
 
+#define INIT_API_PROBE_MANAGED(name)                            \
+    INIT_API_NODAC_PROBE_MANAGED(name)                          \
+    INIT_API_DAC()
+
 #define INIT_API()                                              \
+    INIT_API_NODAC()                                            \
+    INIT_API_DAC()
+
+#define INIT_API_EFN()                                          \
     INIT_API_NODAC()                                            \
     INIT_API_DAC()
 
@@ -284,16 +266,11 @@ HRESULT CheckEEDll();
 // runtime is loaded in the debuggee, e.g. DumpLog, DumpStack. These extensions
 // and functions they call should test g_bDacBroken before calling any DAC enabled
 // feature.
-#define INIT_API_NO_RET_ON_FAILURE()                            \
-    INIT_API_NOEE()                                             \
-    if ((Status = CheckEEDll()) != S_OK)                        \
+#define INIT_API_NO_RET_ON_FAILURE(name)                        \
+    INIT_API_NODAC_PROBE_MANAGED(name)                          \
+    if ((Status = LoadClrDebugDll()) != S_OK)                   \
     {                                                           \
-        ExtOut("Failed to find runtime module (%s), 0x%08x\n", MAKEDLLNAME_A("coreclr"), Status); \
-        ExtOut("Some functionality may be impaired\n");         \
-    }                                                           \
-    else if ((Status = LoadClrDebugDll()) != S_OK)              \
-    {                                                           \
-        ExtOut("Failed to load data access module (%s), 0x%08x\n", MAKEDLLNAME_A("mscordaccore"), Status); \
+        ExtOut("Failed to load data access module (%s), 0x%08x\n", GetDacDllName(), Status); \
         ExtOut("Some functionality may be impaired\n");         \
     }                                                           \
     else                                                        \
@@ -306,6 +283,30 @@ HRESULT CheckEEDll();
     ToRelease<ISOSDacInterface> spISD(g_sos);                   \
     ToRelease<IXCLRDataProcess> spIDP(g_clrData);
     
+#ifdef FEATURE_PAL
+
+#define MINIDUMP_NOT_SUPPORTED()
+#define ONLY_SUPPORTED_ON_WINDOWS_TARGET()
+
+#else // !FEATURE_PAL
+
+#define MINIDUMP_NOT_SUPPORTED()   \
+    if (IsMiniDumpFile())      \
+    {                          \
+        ExtOut("This command is not supported in a minidump without full memory\n"); \
+        ExtOut("To try the command anyway, run !MinidumpMode 0\n"); \
+        return Status;         \
+    }
+
+#define ONLY_SUPPORTED_ON_WINDOWS_TARGET()                                    \
+    if (!IsWindowsTarget())                                                   \
+    {                                                                         \
+        ExtOut("This command is only supported for Windows targets\n");       \
+        return Status;                                                        \
+    }
+
+#endif // FEATURE_PAL
+
 extern BOOL g_bDacBroken;
 
 //-----------------------------------------------------------------------------------------
@@ -336,8 +337,15 @@ class IMachine
 public:
     // Returns the IMAGE_FILE_MACHINE_*** constant corresponding to the target machine
     virtual ULONG GetPlatform() const = 0;
+
     // Returns the size of the CONTEXT for the target machine
     virtual ULONG GetContextSize() const = 0;
+
+    // Returns the architecture's DT_CONTEXT_FULL flags 
+    virtual ULONG GetFullContextFlags() const = 0;
+
+    // Sets the context flags in the context
+    virtual void SetContextFlags(BYTE* context, ULONG32 contextFlags) = 0;
 
     // Disassembles a managed method specified by the IPBegin-IPEnd range
     virtual void Unassembly(
@@ -383,7 +391,6 @@ public:
 
     // Retrieve some target specific output strings
     virtual LPCSTR GetDumpStackHeading() const = 0;
-    virtual LPCSTR GetDumpStackObjectsHeading() const = 0;
     virtual LPCSTR GetSPName() const = 0;
     // Retrieves the non-volatile registers reported to the GC
     virtual void GetGCRegisters(LPCSTR** regNames, unsigned int* cntRegs) const = 0;
@@ -391,6 +398,8 @@ public:
     typedef void (*printfFtn)(const char* fmt, ...);
     // Dumps the GCInfo
     virtual void DumpGCInfo(GCInfoToken gcInfoToken, unsigned methodSize, printfFtn gcPrintf, bool encBytes, bool bPrintHeader) const = 0;
+    // The amount of bytes to adjust the IP for software exception throw instructions (the STACKWALK_CONTROLPC_ADJUST_OFFSET define in the runtime)
+    virtual int StackWalkIPAdjustOffset() const = 0;
 
 protected:
     IMachine()           {}
@@ -408,6 +417,9 @@ extern IMachine* g_targetMachine;
 inline BOOL IsDbgTargetX86()    { return g_targetMachine->GetPlatform() == IMAGE_FILE_MACHINE_I386; }
 inline BOOL IsDbgTargetAmd64()  { return g_targetMachine->GetPlatform() == IMAGE_FILE_MACHINE_AMD64; }
 inline BOOL IsDbgTargetArm()    { return g_targetMachine->GetPlatform() == IMAGE_FILE_MACHINE_ARMNT; }
+inline BOOL IsDbgTargetArm64()  { return g_targetMachine->GetPlatform() == IMAGE_FILE_MACHINE_ARM64; }
+inline BOOL IsDbgTargetRiscV64(){ return g_targetMachine->GetPlatform() == IMAGE_FILE_MACHINE_RISCV64; }
+inline BOOL IsDbgTargetLoongArch64(){ return g_targetMachine->GetPlatform() == IMAGE_FILE_MACHINE_LOONGARCH64; }
 inline BOOL IsDbgTargetWin64()  { return IsDbgTargetAmd64(); }
 
 /* Returns the instruction pointer for the given CONTEXT.  We need this and its family of
@@ -432,7 +444,6 @@ inline CLRDATA_ADDRESS GetBP(const CROSS_PLATFORM_CONTEXT& context)
 {
     return TO_CDADDR(g_targetMachine->GetBP(context));
 }
-
 
 //-----------------------------------------------------------------------------------------
 //
@@ -490,6 +501,12 @@ extern ReadVirtualCache *rvCache;
     if (FAILED(ret)) return;                          \
 }
 
+#define move_xp_retHRESULT(dst, src)                  \
+{                                                     \
+    HRESULT ret = MOVE(dst, src);                     \
+    if (FAILED(ret)) return ret;                      \
+}
+
 #define moveBlock(dst, src, size)                     \
 {                                                     \
     HRESULT ret = MOVEBLOCK(dst, src, size);          \
@@ -502,11 +519,8 @@ extern ReadVirtualCache *rvCache;
 #define CPPMOD
 #endif
 
-#endif
-
 #ifdef __cplusplus
 }
 #endif
 
 #endif // __exts_h__
-

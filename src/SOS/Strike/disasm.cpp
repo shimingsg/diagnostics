@@ -1,6 +1,5 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 // ==++==
 // 
@@ -20,25 +19,23 @@
 namespace X86GCDump
 {
 #include "gcdump.h"
+#undef CONTRACTL
+#undef CONTRACTL_END
+#undef NOTHROW
+#undef GC_NOTRIGGER
 #undef assert
 #define assert(a)
 #define CONTRACTL
-#define DAC_ARG(x)
 #define CONTRACTL_END
-#define LIMITED_METHOD_CONTRACT
 #undef NOTHROW
 #define NOTHROW
 #define GC_NOTRIGGER
-#define SUPPORTS_DAC
-#define LIMITED_METHOD_DAC_CONTRACT
+#define SUPPORTS_DAC ((void)0)
 #include "gcdecoder.cpp"
 #undef CONTRACTL
 #undef CONTRACTL_END
-#undef LIMITED_METHOD_CONTRACT
 #undef NOTHROW
 #undef GC_NOTRIGGER
-#undef _ASSERTE
-#define _ASSERTE(a) do {} while (0)
 
 #include "gcdump.cpp"
 #include "i386/gcdumpx86.cpp"
@@ -48,9 +45,6 @@ namespace X86GCDump
 #ifdef SOS_TARGET_AMD64 
 #include "gcdump.h"
 #define DAC_ARG(x)
-#define SUPPORTS_DAC
-#define LIMITED_METHOD_DAC_CONTRACT
-#undef LIMITED_METHOD_CONTRACT
 #undef PREGDISPLAY
     #ifdef LOG
     #undef LOG
@@ -133,7 +127,7 @@ GenOpenMapping(
         return NULL;
     }
     
-    hMappedFile = CreateFileMapping (
+    hMappedFile = CreateFileMappingA (
                         hFile,
                         NULL,
                         PAGE_READONLY,
@@ -194,7 +188,7 @@ char* PrintOneLine (__in_z char *begin, __in_z char *limit)
                 if (n > 127) {
                     n = 127;
                 }
-                strncpy_s (line,_countof(line), begin, n);
+                strncpy_s (line,ARRAY_SIZE(line), begin, n);
                 line[n] = '\0';
                 ExtOut ("%s", line);
                 begin += n;
@@ -845,7 +839,7 @@ void PrintNativeStack(DWORD_PTR ip, BOOL bSuppressLines)
     char symbol[1024];
     ULONG64 displacement;
 
-    HRESULT hr = g_ExtSymbols->GetNameByOffset(TO_CDADDR(ip), symbol, _countof(symbol), NULL, &displacement);
+    HRESULT hr = g_ExtSymbols->GetNameByOffset(TO_CDADDR(ip), symbol, ARRAY_SIZE(symbol), NULL, &displacement);
     if (SUCCEEDED(hr) && symbol[0] != '\0')
     {
         ExtOut("%s", symbol);
@@ -858,7 +852,7 @@ void PrintNativeStack(DWORD_PTR ip, BOOL bSuppressLines)
         if (!bSuppressLines)
         {
             ULONG line;
-            hr = g_ExtSymbols->GetLineByOffset(TO_CDADDR(ip), &line, filename, _countof(filename), NULL, NULL);
+            hr = g_ExtSymbols->GetLineByOffset(TO_CDADDR(ip), &line, filename, ARRAY_SIZE(filename), NULL, NULL);
             if (SUCCEEDED(hr))
             {
                 ExtOut(" [%s:%d]", filename, line);
@@ -997,8 +991,8 @@ void DumpStackWorker (DumpStackFlag &DSFlag)
     {
         if (IsInterrupt())
             return;
-        DWORD_PTR retAddr;
-        DWORD_PTR whereCalled;
+        TADDR retAddr;
+        TADDR whereCalled;
         move_xp(retAddr, ptr);
         g_targetMachine->IsReturnAddress(retAddr, &whereCalled);
         if (whereCalled)
@@ -1015,9 +1009,9 @@ void DumpStackWorker (DumpStackFlag &DSFlag)
             if (bOutput)
                 ExtOut ("\n");
             
-            DWORD_PTR cxrAddr;
+            TADDR cxrAddr;
             CROSS_PLATFORM_CONTEXT cxr;
-            DWORD_PTR exrAddr;
+            TADDR exrAddr;
             EXCEPTION_RECORD exr;
 
             if (g_targetMachine->GetExceptionContext(ptr,retAddr,&cxrAddr,&cxr,&exrAddr,&exr))
@@ -1046,7 +1040,6 @@ void DumpStackWorker (DumpStackFlag &DSFlag)
 /// X86Machine implementation
 ///
 LPCSTR X86Machine::s_DumpStackHeading = "ChildEBP RetAddr  Caller, Callee\n";
-LPCSTR X86Machine::s_DSOHeading       = "ESP/REG  Object   Name\n";
 LPCSTR X86Machine::s_GCRegs[7]        = {"eax", "ebx", "ecx", "edx", "esi", "edi", "ebp"};
 LPCSTR X86Machine::s_SPName           = "ESP";
 
@@ -1088,7 +1081,6 @@ void X86Machine::DumpGCInfo(GCInfoToken gcInfoToken, unsigned methodSize, printf
 /// ARMMachine implementation
 ///
 LPCSTR ARMMachine::s_DumpStackHeading = "ChildFP  RetAddr  Caller, Callee\n";
-LPCSTR ARMMachine::s_DSOHeading       = "SP/REG  Object   Name\n";
 LPCSTR ARMMachine::s_GCRegs[14]       = {"r0", "r1", "r2",  "r3",  "r4",  "r5",  "r6",
                                          "r7", "r8", "r9",  "r10", "r11", "r12", "lr"};
 LPCSTR ARMMachine::s_SPName           = "sp";
@@ -1100,7 +1092,6 @@ LPCSTR ARMMachine::s_SPName           = "sp";
 /// AMD64Machine implementation
 ///
 LPCSTR AMD64Machine::s_DumpStackHeading = "Child-SP         RetAddr          Caller, Callee\n";
-LPCSTR AMD64Machine::s_DSOHeading       = "RSP/REG          Object           Name\n";
 LPCSTR AMD64Machine::s_GCRegs[15]       = {"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp",
                                            "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"};
 LPCSTR AMD64Machine::s_SPName           = "RSP";
@@ -1128,7 +1119,6 @@ void AMD64Machine::DumpGCInfo(GCInfoToken gcInfoToken, unsigned methodSize, prin
 /// ARM64Machine implementation
 ///
 LPCSTR ARM64Machine::s_DumpStackHeading = "ChildFP          RetAddr          Caller, Callee\n";
-LPCSTR ARM64Machine::s_DSOHeading       = "SP/REG           Object           Name\n";
 // excluding x18, fp & lr as these will not contain object references
 LPCSTR ARM64Machine::s_GCRegs[28]       = {"x0", "x1", "x2",  "x3",  "x4",  "x5",  "x6",
                                            "x7", "x8", "x9",  "x10", "x11", "x12", "x13",
@@ -1137,6 +1127,31 @@ LPCSTR ARM64Machine::s_GCRegs[28]       = {"x0", "x1", "x2",  "x3",  "x4",  "x5"
 LPCSTR ARM64Machine::s_SPName           = "sp";
 
 #endif // SOS_TARGET_ARM64
+
+#ifdef SOS_TARGET_RISCV64
+///
+/// RISCV64Machine implementation
+///
+LPCSTR RISCV64Machine::s_DumpStackHeading = "ChildFP          RetAddr          Caller, Callee\n";
+LPCSTR RISCV64Machine::s_GCRegs[30]       = {"r0", "ra", "gp", "tp", "t0", "t1", "t2", "s1", "a0",
+                                             "a1", "a2", "a3", "a4", "a5", "a6", "a7", "s2", "s3",
+                                             "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11",
+                                             "t3", "t4", "t5", "t6"};
+LPCSTR RISCV64Machine::s_SPName           = "sp";
+
+#endif // SOS_TARGET_RISCV64
+
+#ifdef SOS_TARGET_LOONGARCH64
+///
+/// LOONGARCH64Machine implementation
+///
+LPCSTR LOONGARCH64Machine::s_DumpStackHeading = "ChildFP          RetAddr          Caller, Callee\n";
+LPCSTR LOONGARCH64Machine::s_GCRegs[30]       = {"r0", "ra", "tp", "a0", "a1", "a2", "a3", "a4", "a5",
+                                                 "a6", "a7", "t0", "t1", "t2", "t3", "t4", "t5", "t6",
+                                                 "t7", "t8", "x0", "s0", "s1", "s2", "s3", "s4", "s5",
+                                                 "s6", "s7", "s8"};
+LPCSTR LOONGARCH64Machine::s_SPName           = "sp";
+#endif // SOS_TARGET_LOONGARCH64
 
 //
 // GCEncodingInfo class member implementations

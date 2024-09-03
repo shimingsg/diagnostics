@@ -1,6 +1,5 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 // ==++==
 // 
@@ -382,7 +381,7 @@ void MDInfo::GetMethodName(mdTypeDef token, CQuickBytes *fullName)
     WCHAR szFunctionName[1024];
 
     hr = m_pImport->GetMethodProps(token, &memTypeDef, 
-                                   szFunctionName, _countof(szFunctionName), &nameLen, 
+                                   szFunctionName, ARRAY_SIZE(szFunctionName), &nameLen, 
                                    &flags, &pbSigBlob, &ulSigBlob, &ulCodeRVA, &ulImplFlags);
     if (FAILED (hr))
     {
@@ -393,12 +392,12 @@ void MDInfo::GetMethodName(mdTypeDef token, CQuickBytes *fullName)
     m_szName[0] = L'\0';
     if (memTypeDef != mdTypeDefNil)
     {
-        hr = NameForTypeDef_s (memTypeDef, m_pImport, m_szName, _countof(m_szName));
+        hr = NameForTypeDef_s (memTypeDef, m_pImport, m_szName, ARRAY_SIZE(m_szName));
         if (SUCCEEDED (hr)) {
-            wcscat_s (m_szName, _countof(m_szName), W("."));
+            wcscat_s (m_szName, ARRAY_SIZE(m_szName), W("."));
         }
     }
-    wcscat_s (m_szName, _countof(m_szName), szFunctionName);
+    wcscat_s (m_szName, ARRAY_SIZE(m_szName), szFunctionName);
 
     LONG lSigBlobRemaining;
     hr = GetFullNameForMD(pbSigBlob, ulSigBlob, &lSigBlobRemaining);
@@ -468,28 +467,21 @@ inline bool isCallConv(unsigned sigByte, CorCallingConvention conv)
     return ((sigByte & IMAGE_CEE_CS_CALLCONV_MASK) == (unsigned) conv); 
 }
 
-#ifndef IfFailGoto
+#undef IfFailGoto
 #define IfFailGoto(EXPR, LABEL) \
 do { hr = (EXPR); if(FAILED(hr)) { goto LABEL; } } while (0)
-#endif
 
-#ifndef IfFailGo
+#undef IfFailGo
 #define IfFailGo(EXPR) IfFailGoto(EXPR, ErrExit)
-#endif
 
-#ifndef IfFailRet
+#undef IfFailRet
 #define IfFailRet(EXPR) do { hr = (EXPR); if(FAILED(hr)) { return (hr); } } while (0)
-#endif
-
-#ifndef _ASSERTE
-#define _ASSERTE(expr)
-#endif
 
 HRESULT MDInfo::GetFullNameForMD(PCCOR_SIGNATURE pbSigBlob, ULONG ulSigBlob, LONG *plSigBlobRemaining)
 {
     ULONG       cbCur = 0;
     ULONG       cb;
-    ULONG       ulData = NULL;
+    ULONG       ulData = (TADDR)0;
     ULONG       ulArgs;
     HRESULT     hr = NOERROR;
 

@@ -1,38 +1,29 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
-// ==++==
-// 
- 
-// 
-// ==--==
-
+#undef _TARGET_AMD64_
 #ifndef _TARGET_ARM64_
 #define _TARGET_ARM64_
 #endif
 
-#ifdef _TARGET_AMD64_
-#undef _TARGET_AMD64_
+#undef TARGET_AMD64
+#ifndef TARGET_ARM64
+#define TARGET_ARM64
 #endif
 
 #include "strike.h"
 #include "util.h"
 #include <dbghelp.h>
 
-
 #include "disasm.h"
 
-#include "../../../inc/corhdr.h"
-#include "../../../inc/cor.h"
-#include "../../../inc/dacprivate.h"
+#include "corhdr.h"
+#include "cor.h"
+#include "dacprivate.h"
 
 namespace ARM64GCDump
 {
-#undef _TARGET_X86_
-#undef LIMITED_METHOD_CONTRACT
-#define LIMITED_METHOD_DAC_CONTRACT
-#define SUPPORTS_DAC
+#undef TARGET_X86
 #define LF_GCROOTS
 #define LL_INFO1000
 #define LOG(x)
@@ -152,7 +143,7 @@ void ARM64Machine::Unassembly (
     BOOL bDisplayOffsets,
     std::function<void(ULONG*, UINT*, BYTE*)> displayIL) const
 {
-    TADDR PC = PCBegin;
+    ULONG_PTR PC = PCBegin;
     char line[1024];
     ULONG lineNum;
     ULONG curLine = -1;
@@ -169,7 +160,7 @@ void ARM64Machine::Unassembly (
     while(PC < PCEnd)
     {
         ULONG_PTR currentPC = PC;
-        DisasmAndClean (PC, line, _countof(line));
+        DisasmAndClean (PC, line, ARRAY_SIZE(line));
 
         // This is the closing of the previous run. 
         // Check the next instruction. if it's not a the last movk, handle the accumulated value
@@ -271,7 +262,7 @@ void ARM64Machine::Unassembly (
             ULONG_PTR OrigInstrAddr = GCStressCodeCopy + (InstrAddr - PCBegin);
             ULONG_PTR OrigPC = OrigInstrAddr;
 
-            DisasmAndClean(OrigPC, line, _countof(line));
+            DisasmAndClean(OrigPC, line, ARRAY_SIZE(line));
 
             //
             // Increment the real PC based on the size of the unmodifed

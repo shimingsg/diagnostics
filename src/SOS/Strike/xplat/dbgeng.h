@@ -1,6 +1,5 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 //----------------------------------------------------------------------------
 //
@@ -13,8 +12,8 @@
 
 #include <unknwn.h>
 #include <rpc.h>
-#include <lldbservices.h>
-#include <arrayholder.h>
+#include "lldbservices.h"
+#include "arrayholder.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,9 +33,13 @@ public:
         m_lldbservices2(lldbservices2)
     {
         m_lldbservices->AddRef();
-        if (m_lldbservices2 != nullptr) {
-            m_lldbservices2->AddRef();
-        }
+        m_lldbservices2->AddRef();
+    }
+
+    ~DebugClient()
+    {
+        m_lldbservices->Release();
+        m_lldbservices2->Release();
     }
 
     //----------------------------------------------------------------------------
@@ -281,9 +284,6 @@ public:
         ULONG bufferSize,
         PULONG versionInfoSize)
     {
-        if (m_lldbservices2 == nullptr) {
-            return E_NOINTERFACE;
-        }
         return m_lldbservices2->GetModuleVersionInformation(index, base, item, buffer, bufferSize, versionInfoSize);
     }
 
@@ -338,10 +338,10 @@ public:
     //----------------------------------------------------------------------------
 
     HRESULT 
-    GetCurrentProcessId(
+    GetCurrentProcessSystemId(
         PULONG id)
     {
-        return m_lldbservices->GetCurrentProcessId(id);
+        return m_lldbservices->GetCurrentProcessSystemId(id);
     }
 
     HRESULT 

@@ -1,14 +1,15 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Xunit;
 using Xunit.Extensions;
@@ -25,28 +26,28 @@ namespace Microsoft.Diagnostics.TestHelpers
             get { return _instance.Value; }
         }
 
-        static Lazy<TestRunConfiguration> _instance = new Lazy<TestRunConfiguration>(() => ParseDefaultConfigFile());
+        private static readonly Lazy<TestRunConfiguration> _instance = new(() => ParseDefaultConfigFile());
 
-        static TestRunConfiguration ParseDefaultConfigFile()
+        private static TestRunConfiguration ParseDefaultConfigFile()
         {
             string configFilePath = Path.Combine(TestConfiguration.BaseDir, "Debugger.Tests.Config.txt");
-            TestRunConfiguration testRunConfig = new TestRunConfiguration();
+            TestRunConfiguration testRunConfig = new();
             testRunConfig.ParseConfigFile(configFilePath);
             return testRunConfig;
         }
 
-        DateTime _timestamp = DateTime.Now;
+        private readonly DateTime _timestamp = DateTime.Now;
 
         public IEnumerable<TestConfiguration> Configurations { get; private set; }
 
-        void ParseConfigFile(string path)
+        private void ParseConfigFile(string path)
         {
             string nugetPackages = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
             if (nugetPackages == null)
             {
-                // If not already set, the arcade SDK scripts/build system sets NUGET_PACKAGES 
-                // to the UserProfile or HOME nuget cache directories if building locally (for 
-                // speed) or to the repo root/.packages in CI builds (to isolate global machine 
+                // If not already set, the arcade SDK scripts/build system sets NUGET_PACKAGES
+                // to the UserProfile or HOME nuget cache directories if building locally (for
+                // speed) or to the repo root/.packages in CI builds (to isolate global machine
                 // dependences).
                 //
                 // This emulates that logic so the VS Test Explorer can still run the tests for
@@ -57,7 +58,7 @@ namespace Microsoft.Diagnostics.TestHelpers
                 {
                     nugetPackagesRoot = Environment.GetEnvironmentVariable("UserProfile");
                 }
-                else if (OS.Kind == OSKind.Linux || OS.Kind == OSKind.OSX)
+                else if (OS.Kind is OSKind.Linux or OSKind.OSX)
                 {
                     nugetPackagesRoot = Environment.GetEnvironmentVariable("HOME");
                 }
@@ -67,14 +68,16 @@ namespace Microsoft.Diagnostics.TestHelpers
                 }
             }
             // The TargetArchitecture and NuGetPackageCacheDir can still be overridden
-            // in a config file. This is just setting the default. The other values can 
+            // in a config file. This is just setting the default. The other values can
             // also // be overridden but it is not recommended.
-            Dictionary<string, string> initialConfig = new Dictionary<string, string>
+            Dictionary<string, string> initialConfig = new()
             {
                 ["Timestamp"] = GetTimeStampText(),
                 ["TempPath"] = Path.GetTempPath(),
                 ["WorkingDir"] = GetInitialWorkingDir(),
-                ["OS"] = OS.Kind.ToString(),
+                ["OS"] = OS.Kind.ToString().ToLowerInvariant(),
+                ["IsAlpine"] = OS.IsAlpine.ToString().ToLowerInvariant(),
+                ["TargetRid"] = GetRid(),
                 ["TargetArchitecture"] = OS.TargetArchitecture.ToString().ToLowerInvariant(),
                 ["NuGetPackageCacheDir"] = nugetPackages
             };
@@ -83,10 +86,23 @@ namespace Microsoft.Diagnostics.TestHelpers
                 initialConfig["WinDir"] = Path.GetFullPath(Environment.GetEnvironmentVariable("WINDIR"));
             }
             IEnumerable<Dictionary<string, string>> configs = ParseConfigFile(path, new Dictionary<string, string>[] { initialConfig });
-            Configurations = configs.Select(c => new TestConfiguration(c));
+            Configurations = configs.Select(c => new TestConfiguration(c)).ToList();
         }
 
-        Dictionary<string, string>[] ParseConfigFile(string path, Dictionary<string, string>[] templates)
+        private static string GetRid()
+        {
+            string os = OS.Kind switch
+            {
+                OSKind.Linux => OS.IsAlpine ? "linux-musl" : "linux",
+                OSKind.OSX => "osx",
+                OSKind.Windows => "win",
+                _ => throw new PlatformNotSupportedException(),
+            };
+            string architecture = OS.TargetArchitecture.ToString().ToLowerInvariant();
+            return $"{os}-{architecture}";
+        }
+
+        private Dictionary<string, string>[] ParseConfigFile(string path, Dictionary<string, string>[] templates)
         {
             XDocument doc = XDocument.Load(path);
             XElement elem = doc.Root;
@@ -94,17 +110,17 @@ namespace Microsoft.Diagnostics.TestHelpers
             return ParseConfigSettings(templates, elem);
         }
 
-        string GetTimeStampText()
+        private string GetTimeStampText()
         {
             return _timestamp.ToString("yyyy\\_MM\\_dd\\_hh\\_mm\\_ss\\_ffff");
         }
 
-        string GetInitialWorkingDir()
+        private string GetInitialWorkingDir()
         {
             return Path.Combine(Path.GetTempPath(), "TestRun_" + GetTimeStampText());
         }
 
-        Dictionary<string, string>[] ParseConfigSettings(Dictionary<string, string>[] templates, XElement node)
+        private Dictionary<string, string>[] ParseConfigSettings(Dictionary<string, string>[] templates, XElement node)
         {
             Dictionary<string, string>[] currentTemplates = templates;
             foreach (XElement child in node.Elements())
@@ -114,18 +130,18 @@ namespace Microsoft.Diagnostics.TestHelpers
             return currentTemplates;
         }
 
-        Dictionary<string, string>[] ParseConfigSetting(Dictionary<string, string>[] templates, XElement node)
+        private Dictionary<string, string>[] ParseConfigSetting(Dictionary<string, string>[] templates, XElement node)
         {
-            // As long as the templates are added at the end of the list, the "current" 
+            // As long as the templates are added at the end of the list, the "current"
             // config for this section is the last one in the array.
             Dictionary<string, string> currentTemplate = templates.Last();
 
             switch (node.Name.LocalName)
-            { 
+            {
                 case "Options":
                     if (EvaluateConditional(currentTemplate, node))
                     {
-                        List<Dictionary<string, string>> newTemplates = new List<Dictionary<string, string>>();
+                        List<Dictionary<string, string>> newTemplates = new();
                         foreach (XElement optionNode in node.Elements("Option"))
                         {
                             if (EvaluateConditional(currentTemplate, optionNode))
@@ -171,76 +187,177 @@ namespace Microsoft.Diagnostics.TestHelpers
             return templates;
         }
 
-        bool EvaluateConditional(Dictionary<string, string> config, XElement node)
+        // Currently we only support single function clauses as follows
+        //  Exists('<string: file or directory name>')
+        //  StartsWith('<string>', '<string: prefix>')
+        //  EndsWith('<string>', '<string: postfix>')
+        //  Contains('<string>', '<string: substring>')
+        //  '<string>' == '<string>'
+        //  '<string>' != '<string>'
+        // strings support variable embedding with $(<var_name>). e.g Exists('$(PropsFile)')
+        private static bool EvaluateConditional(Dictionary<string, string> config, XElement node)
         {
+            void ValidateAndResolveParameters(string funcName, int expectedParamCount, List<string> paramList)
+            {
+                if (paramList.Count != expectedParamCount)
+                {
+                    throw new InvalidDataException($"Expected {expectedParamCount} arguments for {funcName} in condition");
+                }
+
+                for (int i = 0; i < paramList.Count; i++)
+                {
+                    paramList[i] = ResolveProperties(config, paramList[i]);
+                }
+            }
+
             foreach (XAttribute attr in node.Attributes("Condition"))
             {
-                string conditionText = attr.Value;
+                string conditionText = attr.Value.Trim();
+                bool isNegative = conditionText.Length > 0 && conditionText[0] == '!';
 
                 // Check if Exists('<directory or file>')
-                const string existsKeyword = "Exists('";
-                int existsStartIndex = conditionText.IndexOf(existsKeyword);
-                if (existsStartIndex != -1)
+                const string existsKeyword = "Exists";
+                if (TryGetParametersForFunction(conditionText, existsKeyword, out List<string> paramList))
                 {
-                    bool not = (existsStartIndex > 0) && (conditionText[existsStartIndex - 1] == '!');
-
-                    existsStartIndex += existsKeyword.Length;
-                    int existsEndIndex = conditionText.IndexOf("')", existsStartIndex);
-                    Assert.NotEqual(-1, existsEndIndex);
-
-                    string path = conditionText.Substring(existsStartIndex, existsEndIndex - existsStartIndex);
-                    path = Path.GetFullPath(ResolveProperties(config, path));
-                    bool exists = Directory.Exists(path) || File.Exists(path);
-                    return not ? !exists : exists;
+                    ValidateAndResolveParameters(existsKeyword, 1, paramList);
+                    bool exists = Directory.Exists(paramList[0]) || File.Exists(paramList[0]);
+                    return isNegative ? !exists : exists;
                 }
-                else
+
+                // Check if StartsWith('string', 'prefix')
+                const string startsWithKeyword = "StartsWith";
+                if (TryGetParametersForFunction(conditionText, startsWithKeyword, out paramList))
                 {
-                    // Check if equals and not equals
-                    string[] parts = conditionText.Split("==");
-                    bool equal;
-
-                    if (parts.Length == 2)
-                    {
-                        equal = true;
-                    }
-                    else
-                    {
-                        parts = conditionText.Split("!=");
-                        Assert.Equal(2, parts.Length);
-                        equal = false;
-                    }
-                    // Resolve any config values in the condition
-                    string leftValue = ResolveProperties(config, parts[0]).Trim();
-                    string rightValue = ResolveProperties(config, parts[1]).Trim();
-
-                    // Now do the simple string comparison of the left/right sides of the condition
-                    return equal ? leftValue == rightValue : leftValue != rightValue;
+                    ValidateAndResolveParameters(startsWithKeyword, 2, paramList);
+                    bool isPrefix = paramList[0].StartsWith(paramList[1]);
+                    return isNegative ? !isPrefix : isPrefix;
                 }
+
+                // Check if EndsWith('string', 'postfix')
+                const string endsWithKeyword = "EndsWith";
+                if (TryGetParametersForFunction(conditionText, endsWithKeyword, out paramList))
+                {
+                    ValidateAndResolveParameters(endsWithKeyword, 2, paramList);
+                    bool isPostfix = paramList[0].EndsWith(paramList[1]);
+                    return isNegative ? !isPostfix : isPostfix;
+                }
+
+                // Check if Contains('string', 'substring')
+                const string containsKeyword = "Contains";
+                if (TryGetParametersForFunction(conditionText, containsKeyword, out paramList))
+                {
+                    ValidateAndResolveParameters(containsKeyword, 2, paramList);
+                    bool isInString = paramList[0].Contains(paramList[1]);
+                    return isNegative ? !isInString : isInString;
+                }
+
+                // Check if equals and not equals
+                bool isEquals = conditionText.Contains("==");
+                bool isDifferent = conditionText.Contains("!=");
+
+                if (isEquals == isDifferent)
+                {
+                    throw new InvalidDataException($"Unknown condition type in {conditionText}. See TestRunConfiguration.EvaluateConditional for supported values.");
+                }
+
+                string[] parts = isEquals ? conditionText.Split("==") : conditionText.Split("!=");
+
+                // Resolve any config values in the condition
+                string leftValue = ResolveProperties(config, parts[0]).Trim();
+                string rightValue = ResolveProperties(config, parts[1]).Trim();
+
+                // Now do the simple string comparison of the left/right sides of the condition
+                return isEquals ? leftValue == rightValue : leftValue != rightValue;
             }
             return true;
         }
 
-        private string ResolveProperties(Dictionary<string, string> config, string rawNodeValue)
+        private static bool TryGetParametersForFunction(string expression, string targetFunctionName, out List<string> exprParams)
         {
-            StringBuilder resolvedValue = new StringBuilder();
-            for(int i = 0; i < rawNodeValue.Length; )
+            int functionKeyworkIndex = expression.IndexOf($"{targetFunctionName}(");
+            if (functionKeyworkIndex == -1)
+            {
+                exprParams = null;
+                return false;
+            }
+
+            if ((functionKeyworkIndex != 0
+                    && functionKeyworkIndex == 1 && expression[0] != '!')
+                || functionKeyworkIndex > 1
+                || !expression.EndsWith(')'))
+            {
+                throw new InvalidDataException($"Condition {expression} malformed. Currently only single-function conditions are supported.");
+            }
+
+            exprParams = new List<string>();
+            bool isWithinString = false;
+            bool expectDelimiter = false;
+            int curParsingIndex = functionKeyworkIndex + targetFunctionName.Length + 1;
+            StringBuilder resolvedValue = new();
+
+            // Account for the trailing parenthesis.
+            while (curParsingIndex + 1 < expression.Length)
+            {
+                char currentChar = expression[curParsingIndex];
+                // toggle string nesting on ', except if scaped
+                if (currentChar == '\'' && !(curParsingIndex > 0 && expression[curParsingIndex - 1] == '\\'))
+                {
+                    if (isWithinString)
+                    {
+                        exprParams.Add(resolvedValue.ToString());
+                        resolvedValue.Clear();
+                        expectDelimiter = true;
+                    }
+
+                    isWithinString = !isWithinString;
+                }
+                else if (isWithinString)
+                {
+                    resolvedValue.Append(currentChar);
+                }
+                else if (currentChar == ',')
+                {
+                    if (!expectDelimiter)
+                    {
+                        throw new InvalidDataException($"Unexpected comma found within {expression}");
+                    }
+                    expectDelimiter = false;
+                }
+                else if (!char.IsWhiteSpace(currentChar))
+                {
+                    throw new InvalidDataException($"Non whitespace, non comma value found outside of string within: {expression}");
+                }
+                curParsingIndex++;
+            }
+
+            if (isWithinString)
+            {
+                throw new InvalidDataException($"Non-terminated string detected within {expression}");
+            }
+            return true;
+        }
+
+        private static string ResolveProperties(Dictionary<string, string> config, string rawNodeValue)
+        {
+            StringBuilder resolvedValue = new();
+            for (int i = 0; i < rawNodeValue.Length;)
             {
                 int propStartIndex = rawNodeValue.IndexOf("$(", i);
                 if (propStartIndex == -1)
                 {
                     if (i != rawNodeValue.Length)
                     {
-                        resolvedValue.Append(rawNodeValue.Substring(i));
+                        resolvedValue.Append(rawNodeValue.AsSpan(i));
                     }
                     break;
                 }
                 else
                 {
-                    int propEndIndex = rawNodeValue.IndexOf(")", propStartIndex+1);
+                    int propEndIndex = rawNodeValue.IndexOf(")", propStartIndex + 1);
                     Assert.NotEqual(-1, propEndIndex);
                     if (propStartIndex != i)
                     {
-                        resolvedValue.Append(rawNodeValue.Substring(i, propStartIndex - i));
+                        resolvedValue.Append(rawNodeValue.AsSpan(i, propStartIndex - i));
                     }
                     // Now resolve the property name from the config dictionary
                     string propertyName = rawNodeValue.Substring(propStartIndex + 2, propEndIndex - propStartIndex - 2);
@@ -262,27 +379,118 @@ namespace Microsoft.Diagnostics.TestHelpers
     /// </summary>
     public class TestConfiguration
     {
-        const string DebugTypeKey = "DebugType";
-        const string DebuggeeBuildRootKey = "DebuggeeBuildRoot";
+        private const string DebugTypeKey = "DebugType";
+        private const string DebuggeeBuildRootKey = "DebuggeeBuildRoot";
 
-        internal static readonly string BaseDir = Path.GetFullPath(".");
+        public static TestConfiguration Empty { get; } = new TestConfiguration();
 
-        private Dictionary<string, string> _settings;
+        public static string BaseDir { get; set; } = Path.GetFullPath(".");
+
+        private static readonly Regex versionRegex = new(@"^(\d+\.\d+\.\d+)(-.*)?", RegexOptions.Compiled);
+
+        private readonly ReadOnlyDictionary<string, string> _settings;
+        private readonly string _configStringView;
+        private readonly string _truncatedRuntimeFrameworkVersion;
 
         public TestConfiguration()
         {
-            _settings = new Dictionary<string, string>();
+            _settings = new ReadOnlyDictionary<string, string>(new Dictionary<string, string>());
+            _truncatedRuntimeFrameworkVersion = null;
+            _configStringView = string.Empty;
         }
 
         public TestConfiguration(Dictionary<string, string> initialSettings)
         {
-            _settings = new Dictionary<string, string>(initialSettings);
+            _settings = new ReadOnlyDictionary<string, string>(new Dictionary<string, string>(initialSettings));
+            _truncatedRuntimeFrameworkVersion = GetTruncatedRuntimeFrameworkVersion();
+            _configStringView = GetStringViewWithVersion(RuntimeFrameworkVersion);
         }
 
-        public IReadOnlyDictionary<string, string> AllSettings
+        public string Serialize()
         {
-            get { return _settings; }
+            List<XElement> nodes = new();
+            foreach (KeyValuePair<string, string> keyvalue in _settings)
+            {
+                nodes.Add(new XElement(keyvalue.Key, keyvalue.Value));
+            }
+            XElement root = new("Configuration", nodes.ToArray());
+            TextWriter writer = new StringWriter();
+            root.Save(writer);
+            return writer.ToString();
         }
+
+        public static TestConfiguration Deserialize(string xml)
+        {
+            XElement root = XElement.Parse(xml);
+            Dictionary<string, string> settings = new();
+            foreach (XElement child in root.Elements())
+            {
+                settings.Add(child.Name.LocalName, child.Value);
+            }
+            return new TestConfiguration(settings);
+        }
+
+        private string GetTruncatedRuntimeFrameworkVersion()
+        {
+            string version = RuntimeFrameworkVersion;
+            if (string.IsNullOrEmpty(version))
+            {
+                return null;
+            }
+
+            Match matchingVer = versionRegex.Match(version);
+            if (!matchingVer.Success)
+            {
+                throw new InvalidDataException($"{version} is not a valid version string according to SemVer.");
+            }
+
+            return matchingVer.Groups[1].Value;
+        }
+
+        private string GetStringViewWithVersion(string version)
+        {
+            StringBuilder sb = new();
+            sb.Append(TestProduct ?? "");
+            string debuggeeBuildProcess = DebuggeeBuildProcess;
+            if (!string.IsNullOrEmpty(debuggeeBuildProcess))
+            {
+                sb.Append('.');
+                sb.Append(debuggeeBuildProcess);
+            }
+            if (PublishSingleFile)
+            {
+                sb.Append(".singlefile");
+            }
+            if (!string.IsNullOrEmpty(version))
+            {
+                sb.Append('.');
+                sb.Append(version);
+            }
+            return sb.ToString();
+        }
+
+        public string LogSuffix
+        {
+            get
+            {
+                string version = RuntimeFrameworkVersion;
+
+                // The log name can't contain wild cards, which are used in some testing scenarios.
+                // TODO: The better solution would be to sanitize the file name properly, in case
+                // there's a key being used that contains a character that is not a valid file
+                // name charater.
+                if (!string.IsNullOrEmpty(version) && version.Contains('*'))
+                {
+                    version = _truncatedRuntimeFrameworkVersion;
+                }
+
+                return GetStringViewWithVersion(version);
+            }
+        }
+
+        public bool IsEmpty => _settings.Count == 0;
+
+        public IReadOnlyDictionary<string, string> AllSettings => _settings;
 
         /// <summary>
         /// Creates a new test config with the new PDB type (full, portable or embedded)
@@ -293,7 +501,8 @@ namespace Microsoft.Diagnostics.TestHelpers
         {
             Debug.Assert(!string.IsNullOrWhiteSpace(pdbType));
 
-            var currentSettings = new Dictionary<string, string>(_settings) {
+            Dictionary<string, string> currentSettings = new(_settings)
+            {
 
                 // Set or replace if the pdb debug type
                 [DebugTypeKey] = pdbType,
@@ -311,7 +520,7 @@ namespace Microsoft.Diagnostics.TestHelpers
         /// </summary>
         public string TargetArchitecture
         {
-            get { return GetValue("TargetArchitecture").ToLowerInvariant(); }
+            get { return GetValue("TargetArchitecture")?.ToLowerInvariant(); }
         }
 
         /// <summary>
@@ -327,7 +536,7 @@ namespace Microsoft.Diagnostics.TestHelpers
         /// </summary>
         public string TestProduct
         {
-            get { return GetValue("TestProduct").ToLowerInvariant(); }
+            get { return GetValue("TestProduct")?.ToLowerInvariant(); }
         }
 
         /// <summary>
@@ -347,7 +556,7 @@ namespace Microsoft.Diagnostics.TestHelpers
         }
 
         /// <summary>
-        /// The test runner script directory 
+        /// The test runner script directory
         /// </summary>
         public string ScriptRootDir
         {
@@ -432,6 +641,14 @@ namespace Microsoft.Diagnostics.TestHelpers
         }
 
         /// <summary>
+        /// Auxiliary properties used by CLI based test projects file will be fetched from this path and copied to DebuggeeSourceRoot
+        /// </summary>
+        public string DebuggeeMsbuildAuxRoot
+        {
+            get { return MakeCanonicalPath(GetValue("DebuggeeMsbuildAuxRoot")); }
+        }
+
+        /// <summary>
         /// Debuggee final sources/project file/binary outputs will be placed here: <DebuggeeBuildRoot>/<DebuggeeName>/
         /// </summary>
         public string DebuggeeBuildRoot
@@ -456,7 +673,7 @@ namespace Microsoft.Diagnostics.TestHelpers
         }
 
         /// <summary>
-        /// The framework type/version used to build the debuggee like "netcoreapp2.0" or "netstandard1.0".
+        /// The framework type/version used to build the debuggee like "net6.0" or "net7.0"
         /// </summary>
         public string BuildProjectFramework
         {
@@ -464,8 +681,8 @@ namespace Microsoft.Diagnostics.TestHelpers
         }
 
         /// <summary>
-        /// Optional runtime identifier (RID) like "linux-x64" or "win-x86". If set, causes the debuggee to 
-        /// be built a as "standalone" dotnet cli project where the runtime is copied to the debuggee build 
+        /// Optional runtime identifier (RID) like "linux-x64" or "win-x86". If set, causes the debuggee to
+        /// be built a as "standalone" dotnet cli project where the runtime is copied to the debuggee build
         /// root.
         /// </summary>
         public string BuildProjectRuntime
@@ -474,10 +691,18 @@ namespace Microsoft.Diagnostics.TestHelpers
         }
 
         /// <summary>
-        /// The version of the Microsoft.NETCore.App package to reference when running the debuggee (i.e. 
+        /// Returns "true" if build/run this cli debuggee as a single-file app
+        /// </summary>
+        public bool PublishSingleFile
+        {
+            get { return string.Equals(GetValue("PublishSingleFile"), "true", StringComparison.InvariantCultureIgnoreCase); }
+        }
+
+        /// <summary>
+        /// The version of the Microsoft.NETCore.App package to reference when running the debuggee (i.e.
         /// using the dotnet cli --fx-version option).
         /// </summary>
-        public string RuntimeFrameworkVersion 
+        public string RuntimeFrameworkVersion
         {
             get { return GetValue("RuntimeFrameworkVersion"); }
         }
@@ -488,12 +713,16 @@ namespace Microsoft.Diagnostics.TestHelpers
         /// <exception cref="SkipTestException">the RuntimeFrameworkVersion property doesn't exist</exception>
         public int RuntimeFrameworkVersionMajor
         {
-            get {
+            get
+            {
                 string version = RuntimeFrameworkVersion;
-                if (version != null) {
+                if (version != null)
+                {
                     string[] parts = version.Split('.');
-                    if (parts.Length > 0) {
-                        if (int.TryParse(parts[0], out int major)) {
+                    if (parts.Length > 0)
+                    {
+                        if (int.TryParse(parts[0], out int major))
+                        {
                             return major;
                         }
                     }
@@ -555,7 +784,7 @@ namespace Microsoft.Diagnostics.TestHelpers
         /// </summary>
         public bool LogToConsole
         {
-            get { return bool.TryParse(GetValue("LogToConsole"), out bool b) && b; }
+            get { return string.Equals(GetValue("LogToConsole"), "true", StringComparison.InvariantCultureIgnoreCase); }
         }
 
         /// <summary>
@@ -574,6 +803,18 @@ namespace Microsoft.Diagnostics.TestHelpers
             get { return GetValue("LinkerPackageVersion"); }
         }
 
+        /// <summary>
+        /// The root of the dotnet install to use to run the test (i.e. $(RepoRootDir)/.dotnet-test)
+        /// </summary>
+        public string DotNetRoot
+        {
+            get
+            {
+                string dotnetRoot = GetValue("DotNetRoot");
+                return MakeCanonicalPath(dotnetRoot);
+            }
+        }
+
         #region Runtime Features properties
 
         /// <summary>
@@ -581,7 +822,12 @@ namespace Microsoft.Diagnostics.TestHelpers
         /// </summary>
         public bool CreateDumpExists
         {
-            get { return OS.Kind == OSKind.Linux && IsNETCore && RuntimeFrameworkVersionMajor > 1; }
+            get
+            {
+                return OS.Kind == OSKind.Linux && IsNETCore && RuntimeFrameworkVersionMajor >= 2 ||
+                       OS.Kind == OSKind.OSX && IsNETCore && RuntimeFrameworkVersionMajor >= 5 ||
+                       OS.Kind == OSKind.Windows && IsNETCore && RuntimeFrameworkVersionMajor >= 5;
+            }
         }
 
         /// <summary>
@@ -642,7 +888,7 @@ namespace Microsoft.Diagnostics.TestHelpers
                 return null;
             }
             // we will assume any path referencing an http endpoint is canonical already
-            if(maybeRelativePath.StartsWith("http:") ||
+            if (maybeRelativePath.StartsWith("http:") ||
                maybeRelativePath.StartsWith("https:"))
             {
                 return maybeRelativePath;
@@ -654,17 +900,7 @@ namespace Microsoft.Diagnostics.TestHelpers
 
         public override string ToString()
         {
-            var sb = new StringBuilder();
-            sb.Append(TestProduct);
-            sb.Append(".");
-            sb.Append(DebuggeeBuildProcess);
-            string version = RuntimeFrameworkVersion;
-            if (!string.IsNullOrEmpty(version))
-            {
-                sb.Append(".");
-                sb.Append(version);
-            }
-            return sb.ToString();
+            return _configStringView;
         }
     }
 
@@ -703,12 +939,28 @@ namespace Microsoft.Diagnostics.TestHelpers
                 // Default to Unknown
                 Kind = OSKind.Unknown;
             }
+            if (Kind == OSKind.Linux)
+            {
+                try
+                {
+                    string ostype = File.ReadAllText("/etc/os-release");
+                    IsAlpine = ostype.Contains("ID=alpine");
+                }
+                catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException or IOException)
+                {
+                }
+            }
         }
 
         /// <summary>
         /// The OS the tests are running.
         /// </summary>
         public static OSKind Kind { get; private set; }
+
+        /// <summary>
+        /// Returns true if Alpine Linux distro
+        /// </summary>
+        public static bool IsAlpine { get; private set; }
 
         /// <summary>
         /// The architecture the tests are running.  We are assuming that the test runner, the debugger and the debugger's target are all the same architecture.

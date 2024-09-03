@@ -1,12 +1,10 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 #include "WatchCmd.h"
 
-#ifndef IfFailRet
+#undef IfFailRet
 #define IfFailRet(EXPR) do { Status = (EXPR); if(FAILED(Status)) { return (Status); } } while (0)
-#endif
 
 _PersistList::~_PersistList()
 {
@@ -95,7 +93,6 @@ HRESULT WatchCmd::Print(int expansionIndex, __in_z WCHAR* expansionPath, __in_z 
     INIT_API_EE();
     INIT_API_DAC();
     EnableDMLHolder dmlHolder(TRUE);
-    IfFailRet(InitCorDebugInterface());
 
     PersistList* pFilterList = NULL;
     if(pFilterName != NULL)
@@ -208,7 +205,6 @@ HRESULT WatchCmd::SaveList(__in_z WCHAR* pSaveName)
     HRESULT Status = S_OK;
     INIT_API_EE();
     INIT_API_DAC();
-    IfFailRet(InitCorDebugInterface());
 
     RemoveList(pSaveName);
     PersistList* pList = new PersistList();

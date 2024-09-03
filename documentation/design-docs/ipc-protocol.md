@@ -326,7 +326,8 @@ enum class CommandSet : uint8_t
     // reserved = 0x00,
     Dump        = 0x01,
     EventPipe   = 0x02,
-    Profiler    = 0x03
+    Profiler    = 0x03,
+    Process     = 0x04,
     // future
 
     Server = 0xFF,
@@ -348,6 +349,8 @@ enum class EventPipeCommandId : uint8_t
     StopTracing     = 0x01, // stop a given session
     CollectTracing  = 0x02, // create/start a given session
     CollectTracing2 = 0x03, // create/start a given session with/without rundown
+    CollectTracing3 = 0x04, // create/start a given session with/without collecting stacks
+    CollectTracing4 = 0x05, // create/start a given session with specific rundown keyword
 }
 ```
 See: [EventPipe Commands](#EventPipe-Commands)
@@ -365,12 +368,28 @@ See: [Dump Commands](#Dump-Commands)
 ```c++
 enum class ProfilerCommandId : uint8_t
 {
-    // reserver     = 0x00,
+    // reserved     = 0x00,
     AttachProfiler  = 0x01,
     // future
 }
-``` 
+```
 See: [Profiler Commands](#Profiler-Commands)
+
+```c++
+enum class ProcessCommandId : uint8_t
+{
+    ProcessInfo        = 0x00,
+    ResumeRuntime      = 0x01,
+    ProcessEnvironment = 0x02,
+    ProcessInfo2       = 0x04,
+    EnablePerfMap      = 0x05,
+    DisablePerfMap     = 0x06,
+    ApplyStartupHook   = 0x07
+    ProcessInfo3       = 0x08,
+    // future
+}
+```
+See: [Process Commands](#Process-Commands)
 
 Commands may use the generic `{ magic="DOTNET_IPC_V1"; size=20; command_set=0xFF (Server); command_id=0x00 (OK); reserved = 0x0000; }` to indicate success rather than having a command specific success `command_id`.
 
@@ -378,13 +397,15 @@ For example, the Command to start a stream session with EventPipe would be `0x02
 
 ## EventPipe Commands
 
-```c
+```c++
 enum class EventPipeCommandId : uint8_t
 {
     // reserved = 0x00,
     StopTracing     = 0x01, // stop a given session
     CollectTracing  = 0x02, // create/start a given session
     CollectTracing2 = 0x03, // create/start a given session with/without rundown
+    CollectTracing3 = 0x04, // create/start a given session with/without collecting stacks
+    CollectTracing4 = 0x05, // create/start a given session with specific rundown keyword
 }
 ```
 EventPipe Payloads are encoded with the following rules:
@@ -443,7 +464,7 @@ Payload
     array<provider_config> providers
 }
 
-provider_config 
+provider_config
 {
     ulong keywords,
     uint logLevel,
@@ -465,7 +486,7 @@ Followed by an Optional Continuation of a `nettrace` format stream of events.
 
 Command Code: `0x0203`
 
-The `CollectTracing2` Command is an extension of the `CollectTracing` command - its behavior is the same as `CollectTracing` command, except that it has another field that lets you specify whether rundown events should be fired by the runtime.
+The `CollectTracing2` command is an extension of the `CollectTracing` command - its behavior is the same as `CollectTracing` command, except that it has another field that lets you specify whether rundown events should be fired by the runtime.
 
 #### Inputs:
 
@@ -483,7 +504,7 @@ A `provider_config` is composed of the following data:
 * `string filter_data` (optional): Filter information
 
 > see ETW documentation for a more detailed explanation of Keywords, Filters, and Log Level.
-> 
+>
 #### Returns (as an IPC Message Payload):
 
 Header: `{ Magic; 28; 0xFF00; 0x0000; }`
@@ -503,7 +524,7 @@ Payload
     array<provider_config> providers
 }
 
-provider_config 
+provider_config
 {
     ulong keywords,
     uint logLevel,
@@ -521,7 +542,134 @@ Payload
 ```
 Followed by an Optional Continuation of a `nettrace` format stream of events.
 
-### `StopTracing` 
+### `CollectTracing3`
+
+Command Code: `0x0204`
+
+The `CollectTracing3` command is an extension of the `CollectTracing2` command - its behavior is the same as `CollectTracing2` command, except that it has another field that lets you specify whether the stackwalk should be made for each event.
+
+#### Inputs:
+
+Header: `{ Magic; Size; 0x0203; 0x0000 }`
+
+* `uint circularBufferMB`: The size of the circular buffer used for buffering event data while streaming
+* `uint format`: 0 for the legacy NetPerf format and 1 for the NetTrace format
+* `bool requestRundown`: Indicates whether rundown should be fired by the runtime.
+* `bool requestStackwalk`: Indicates whether stacktrace information should be recorded.
+* `array<provider_config> providers`: The providers to turn on for the streaming session
+
+A `provider_config` is composed of the following data:
+* `ulong keywords`: The keywords to turn on with this providers
+* `uint logLevel`: The level of information to turn on
+* `string provider_name`: The name of the provider
+* `string filter_data` (optional): Filter information
+
+> see ETW documentation for a more detailed explanation of Keywords, Filters, and Log Level.
+>
+#### Returns (as an IPC Message Payload):
+
+Header: `{ Magic; 28; 0xFF00; 0x0000; }`
+
+`CollectTracing3` returns:
+* `ulong sessionId`: the ID for the stream session starting on the current connection
+
+##### Details:
+
+Input:
+```
+Payload
+{
+    uint circularBufferMB,
+    uint format,
+    bool requestRundown,
+    bool requestStackwalk,
+    array<provider_config> providers
+}
+
+provider_config
+{
+    ulong keywords,
+    uint logLevel,
+    string provider_name,
+    string filter_data (optional)
+}
+```
+
+Returns:
+```c
+Payload
+{
+    ulong sessionId
+}
+```
+Followed by an Optional Continuation of a `nettrace` format stream of events.
+
+### `CollectTracing4`
+
+Command Code: `0x0205`
+
+The `CollectTracing4` command is an extension of the `CollectTracing3` command - its behavior is the same as `CollectTracing3` command, except the requestRundown field is replaced by the rundownKeyword field to allow customizing the set of rundown events to be fired. 
+
+A rundown keyword of `0x80020139` has the equivalent behavior as `CollectTracing3` with `requestRundown=true` and rundown keyword of `0` has the equivalent behavior as `requestRundown=false`.
+
+
+> Note available for .NET 9.0 and later.
+
+#### Inputs:
+
+Header: `{ Magic; Size; 0x0205; 0x0000 }`
+
+* `uint circularBufferMB`: The size of the circular buffer used for buffering event data while streaming
+* `uint format`: 0 for the legacy NetPerf format and 1 for the NetTrace format
+* `ulong rundownKeyword`: Indicates the keyword for the rundown provider
+* `array<provider_config> providers`: The providers to turn on for the streaming session
+
+A `provider_config` is composed of the following data:
+* `ulong keywords`: The keywords to turn on with this providers
+* `uint logLevel`: The level of information to turn on
+* `string provider_name`: The name of the provider
+* `string filter_data` (optional): Filter information
+
+> see ETW documentation for a more detailed explanation of Keywords, Filters, and Log Level.
+>
+#### Returns (as an IPC Message Payload):
+
+Header: `{ Magic; 28; 0xFF00; 0x0000; }`
+
+`CollectTracing4` returns:
+* `ulong sessionId`: the ID for the stream session starting on the current connection
+
+##### Details:
+
+Input:
+```
+Payload
+{
+    uint circularBufferMB,
+    uint format,
+    ulong rundownKeyword
+    array<provider_config> providers
+}
+
+provider_config
+{
+    ulong keywords,
+    uint logLevel,
+    string provider_name,
+    string filter_data (optional)
+}
+```
+
+Returns:
+```c
+Payload
+{
+    ulong sessionId
+}
+```
+Followed by an Optional Continuation of a `nettrace` format stream of events.
+
+### `StopTracing`
 
 Command Code: `0x0201`
 
@@ -662,7 +810,363 @@ Payload
 }
 ```
 
-### Errors
+## Process Commands
+
+> Available since .NET 5.0
+
+### `ProcessInfo`
+
+Command Code: `0x0400`
+
+The `ProcessInfo` command queries the runtime for some basic information about the process.
+
+In the event of an [error](#Errors), the runtime will attempt to send an error message and subsequently close the connection.
+
+#### Inputs:
+
+Header: `{ Magic; Size; 0x0400; 0x0000 }`
+
+There is no payload.
+
+#### Returns (as an IPC Message Payload):
+
+Header: `{ Magic; size; 0xFF00; 0x0000; }`
+
+Payload:
+* `int64 processId`: the process id in the process's PID-space
+* `GUID runtimeCookie`: a 128-bit GUID that should be unique across PID-spaces
+* `string commandLine`: the command line that invoked the process
+  * Windows: will be the same as the output of `GetCommandLineW`
+  * Non-Windows: will be the fully qualified path of the executable in `argv[0]` followed by all arguments as the appear in `argv` separated by spaces, i.e., `/full/path/to/argv[0] argv[1] argv[2] ...`
+* `string OS`: the operating system that the process is running on
+  * macOS => `"macOS"`
+  * Windows => `"Windows"`
+  * Linux => `"Linux"`
+  * other => `"Unknown"`
+* `string arch`: the architecture of the process
+  * 32-bit => `"x86"`
+  * 64-bit => `"x64"`
+  * ARM32 => `"arm32"`
+  * ARM64 => `"arm64"`
+  * Other => `"Unknown"`
+
+##### Details:
+
+Returns:
+```c++
+struct Payload
+{
+    uint64_t ProcessId;
+    LPCWSTR CommandLine;
+    LPCWSTR OS;
+    LPCWSTR Arch;
+    GUID RuntimeCookie;
+}
+```
+
+### `ResumeRuntime`
+
+Command Code: `0x0401`
+
+If the target .NET application has been configured Diagnostic Ports configured to suspend with `DOTNET_DiagnosticPorts` or `DOTNET_DefaultDiagnosticPortSuspend` has been set to `1` (`0` is the default value), then the runtime will pause during `EEStartupHelper` in `ceemain.cpp` and wait for an event to be set.  (See [Diagnostic Ports](#diagnostic-ports) for more details)
+
+The `ResumeRuntime` command sets the necessary event to resume runtime startup.  If the .NET application _has not_ been configured to with Diagnostics Monitor Address or the runtime has _already_ been resumed, this command is a no-op.
+
+In the event of an [error](#Errors), the runtime will attempt to send an error message and subsequently close the connection.
+
+#### Inputs:
+
+Header: `{ Magic; Size; 0x0401; 0x0000 }`
+
+There is no payload.
+
+#### Returns (as an IPC Message Payload):
+
+Header: `{ Magic; size; 0xFF00; 0x0000; }`
+
+There is no payload.
+
+### `ProcessEnvironment`
+
+Command Code: `0x0402`
+
+The `ProcessEnvironment` command queries the runtime for its environment block.
+
+In the event of an [error](#Errors), the runtime will attempt to send an error message and subsequently close the connection.
+
+#### Inputs:
+
+Header: `{ Magic; Size; 0x0402; 0x0000 }`
+
+There is no payload.
+
+#### Returns (as an IPC Message Payload + continuation):
+
+Header: `{ Magic; size; 0xFF00; 0x0000; }`
+
+Payload:
+* `uint32_t nIncomingBytes`: the number of bytes to expect in the continuation stream
+* `uint16_t future`: unused
+
+Continuation:
+* `Array<Array<WCHAR>> environmentBlock`: The environment block written as a length prefixed array of length prefixed arrays of `WCHAR`.
+
+Note: it is valid for `nIncomingBytes` to be `4` and the continuation to simply contain the value `0`.
+
+##### Details:
+
+Returns:
+```c++
+struct Payload
+{
+    uint32_t nIncomingBytes;
+    uint16_t future;
+}
+```
+
+> Available since .NET 6.0
+
+### `ProcessInfo2`
+
+Command Code: `0x0404`
+
+The `ProcessInfo2` command queries the runtime for some basic information about the process. The returned payload has the same information as that of the `ProcessInfo` command in addition to the managed entrypoint assembly name and CLR product version.
+
+In the event of an [error](#Errors), the runtime will attempt to send an error message and subsequently close the connection.
+
+#### Inputs:
+
+Header: `{ Magic; Size; 0x0404; 0x0000 }`
+
+There is no payload.
+
+#### Returns (as an IPC Message Payload):
+
+Header: `{ Magic; size; 0xFF00; 0x0000; }`
+
+Payload:
+* `int64 processId`: the process id in the process's PID-space
+* `GUID runtimeCookie`: a 128-bit GUID that should be unique across PID-spaces
+* `string commandLine`: the command line that invoked the process
+  * Windows: will be the same as the output of `GetCommandLineW`
+  * Non-Windows: will be the fully qualified path of the executable in `argv[0]` followed by all arguments as the appear in `argv` separated by spaces, i.e., `/full/path/to/argv[0] argv[1] argv[2] ...`
+* `string OS`: the operating system that the process is running on
+  * macOS => `"macOS"`
+  * Windows => `"Windows"`
+  * Linux => `"Linux"`
+  * other => `"Unknown"`
+* `string arch`: the architecture of the process
+  * 32-bit => `"x86"`
+  * 64-bit => `"x64"`
+  * ARM32 => `"arm32"`
+  * ARM64 => `"arm64"`
+  * Other => `"Unknown"`
+* `string managedEntrypointAssemblyName`: the assembly name from the assembly identity of the entrypoint assembly of the process. This is the same value that is returned from executing `System.Reflection.Assembly.GetEntryAssembly().GetName().Name` in the target process.
+* `string clrProductVersion`: the product version of the CLR of the process; may contain prerelease label information e.g. `6.0.0-preview.6.#####`
+
+##### Details:
+
+Returns:
+```c++
+struct Payload
+{
+    uint64_t ProcessId;
+    LPCWSTR CommandLine;
+    LPCWSTR OS;
+    LPCWSTR Arch;
+    GUID RuntimeCookie;
+    LPCWSTR ManagedEntrypointAssemblyName;
+    LPCWSTR ClrProductVersion;
+}
+```
+
+> Available since .NET 7.0
+
+### `EnablePerfMap`
+
+Command Code: `0x0405`
+
+The `EnablePerfMap` command instructs the runtime to start emitting perfmap or jitdump files for the process. These files are used by the perf tool to correlate jitted code addresses in a trace.
+
+In the event of an [error](#Errors), the runtime will attempt to send an error message and subsequently close the connection.
+
+#### Inputs:
+
+Header: `{ Magic; Size; 0x0405; 0x0000 }`
+
+Payload:
+* `uint32_t perfMapType`: the type of generation to enable
+
+#### Returns (as an IPC Message Payload):
+
+Header: `{ Magic; 28; 0xFF00; 0x0000; }`
+
+`EnablePerfMap` returns:
+* `int32 hresult`: The result of enabling the perfmap or jitdump files (`0` indicates success)
+
+##### Details:
+
+Inputs:
+```c++
+enum class PerfMapType
+{
+    DISABLED = 0,
+    ALL      = 1,
+    JITDUMP  = 2,
+    PERFMAP  = 3
+}
+
+struct Payload
+{
+    uint32_t perfMapType;
+}
+```
+
+Returns:
+```c
+Payload
+{
+    int32 hresult
+}
+```
+
+> Available since .NET 8.0
+
+### `DisablePerfMap`
+
+Command Code: `0x0406`
+
+The `DisablePerfMap` command instructs the runtime to stop emitting perfmap or jitdump files for the process. These files are used by the perf tool to correlate jitted code addresses in a trace.
+
+In the event of an [error](#Errors), the runtime will attempt to send an error message and subsequently close the connection.
+
+#### Inputs:
+
+Header: `{ Magic; Size; 0x0405; 0x0000 }`
+
+Payload: There is no payload with this command.
+
+#### Returns (as an IPC Message Payload):
+
+Header: `{ Magic; 28; 0xFF00; 0x0000; }`
+
+`DisablePerfMap` returns:
+* `int32 hresult`: The result of enabling the perfmap or jitdump files (`0` indicates success)
+
+##### Details:
+
+Returns:
+```c
+Payload
+{
+    int32 hresult
+}
+```
+
+> Available since .NET 8.0
+
+### `ApplyStartupHook`
+
+Command Code: `0x0407`
+
+The `ApplyStartupHook` command is used to provide a path to a managed assembly with a [startup hook](https://github.com/dotnet/runtime/blob/main/docs/design/features/host-startup-hook.md) to the runtime. During diagnostic suspension, the startup hook path will be added list of hooks that the runtime will execute once it has been resumed.
+
+In the event of an [error](#Errors), the runtime will attempt to send an error message and subsequently close the connection.
+
+#### Inputs:
+
+Header: `{ Magic; Size; 0x0407; 0x0000 }`
+
+* `string startupHookPath`: The path to the managed assembly that contains the startup hook implementation.
+
+#### Returns (as an IPC Message Payload):
+
+Header: `{ Magic; size; 0xFF00; 0x0000; }`
+
+`ApplyStartupHook` returns:
+* `int32 hresult`: The result of adding the startup hook (`0` indicates success)
+
+##### Details:
+
+Input:
+```
+Payload
+{
+    string startupHookPath
+}
+```
+
+Returns:
+```c++
+struct Payload
+{
+    int32 hresult
+}
+```
+
+> Available since .NET 8.0
+
+### `ProcessInfo3`
+
+Command Code: `0x0408`
+
+The `ProcessInfo3` command queries the runtime for some basic information about the process. The returned payload is versioned and fields will be added over time.
+
+In the event of an [error](#Errors), the runtime will attempt to send an error message and subsequently close the connection.
+
+#### Inputs:
+
+Header: `{ Magic; Size; 0x0408; 0x0000 }`
+
+There is no payload.
+
+#### Returns (as an IPC Message Payload):
+
+Header: `{ Magic; size; 0xFF00; 0x0000; }`
+
+Payload:
+* `uint32 version`: the version of the payload returned. Future versions can add new fields after the end of the current structure, but will never remove or change any field that has already been defined.
+* `uint64 processId`: the process id in the process's PID-space
+* `GUID runtimeCookie`: a 128-bit GUID that should be unique across PID-spaces
+* `string commandLine`: the command line that invoked the process
+  * Windows: will be the same as the output of `GetCommandLineW`
+  * Non-Windows: will be the fully qualified path of the executable in `argv[0]` followed by all arguments as the appear in `argv` separated by spaces, i.e., `/full/path/to/argv[0] argv[1] argv[2] ...`
+* `string OS`: the operating system that the process is running on
+  * macOS => `"macOS"`
+  * Windows => `"Windows"`
+  * Linux => `"Linux"`
+  * other => `"Unknown"`
+* `string arch`: the architecture of the process
+  * 32-bit => `"x86"`
+  * 64-bit => `"x64"`
+  * ARM32 => `"arm32"`
+  * ARM64 => `"arm64"`
+  * Other => `"Unknown"`
+* `string managedEntrypointAssemblyName`: the assembly name from the assembly identity of the entrypoint assembly of the process. This is the same value that is returned from executing `System.Reflection.Assembly.GetEntryAssembly().GetName().Name` in the target process.
+* `string clrProductVersion`: the product version of the CLR of the process; may contain prerelease label information e.g. `6.0.0-preview.6.#####`
+* `string runtimeIdentifier`: information to identify the platform this runtime targets, e.g. `linux_musl_arm`64, `linux_x64`, or `windows_x64` are all valid identifiers. See [.NET RID Catalog](https://learn.microsoft.com/en-us/dotnet/core/rid-catalog) for more information.
+
+##### Details:
+
+Returns:
+```c++
+struct Payload
+{
+    uint32_t Version;
+    uint64_t ProcessId;
+    LPCWSTR CommandLine;
+    LPCWSTR OS;
+    LPCWSTR Arch;
+    GUID RuntimeCookie;
+    LPCWSTR ManagedEntrypointAssemblyName;
+    LPCWSTR ClrProductVersion;
+    LPCWSTR RuntimeIdentifier;
+}
+```
+
+> Available since .NET 8.0
+
+## Errors
 
 In the event an error occurs in the handling of an Ipc Message, the Diagnostic Server will attempt to send an Ipc Message encoding the error and subsequently close the connection.  The connection will be closed **regardless** of the success of sending the error message.  The Client is expected to be resilient in the event of a connection being abruptly closed.
 
@@ -744,35 +1248,117 @@ For example, if the Diagnostic Server finds incorrectly encoded data while parsi
   </tr>
 </table>
 
------
-### Current Implementation (OLD)
+# Diagnostic Ports
 
-Single-purpose IPC protocol used exclusively for EventPipe functionality.  "Packets" in the current implementation are simply the `nettrace` payloads and command/control is handled via `uint32` enum values sent one way with hard coded responses expected.
+> Available since .NET 5.0
 
-```c++
-enum class DiagnosticMessageType : uint32_t
-{
-    // EventPipe
-    StartEventPipeTracing = 1024, // To file
-    StopEventPipeTracing,
-    CollectEventPipeTracing, // To IPC
-};
+A Diagnostic Port is a mechanism for communicating the Diagnostics IPC Protocol to a .NET application from out of process.  There are two flavors of Diagnostic Port: `connect` and `listen`.  A `listen` Port is when the runtime creates an IPC transport and listens for incoming connections.  The default Diagnostic Port is an example of a `listen` Port.  You cannot currently configure additional `listen` Ports.  A `connect` Port is when the runtime attempts to connect to an IPC transport owned by another process.  Upon connection to a `connect` Port, the runtime will send an [Advertise](#advertise-protocol) message signalling that it is ready to accept Diagnostics IPC Protocol commands.  Each command consumes a connection, and the runtime will reconnect to the `connect` Port to wait for more commands.
 
-struct MessageHeader
-{
-    DiagnosticMessageType RequestType;
-    uint32_t Pid;
-};
+.NET applications can configure Diagnostic Ports with the following environment variables:
+
+ * `DOTNET_DiagnosticPorts=<port address>[,tag[...]][;<port address>[,tag[...]][...]]`
+
+where:
+
+* `<port address>` is a NamedPipe name without `\\.\pipe\` on Windows, and the full path to a Unix domain socket on other platforms
+* `tag ::= <SUSPEND_MODE> | <PORT_TYPE>`
+* `<SUSPEND_MODE> ::= suspend | nosuspend` (default value is suspend)`
+* `<PORT_TYPE> ::= connect` (future types such as additional listen ports could be added to this list)
+
+Example usage:
+
+```shell
+$ export DOTNET_DiagnosticPorts=$DOTNET_DiagnosticPorts;~/mydiagport.sock,nosuspend;
 ```
 
-```
-runtime <- client : MessageHeader { CollectEventPipeTracing }
-    error? -> 0 then session close
-runtime -> client : session ID 
-runtime -> client : event stream
+Any diagnostic ports specified in this configuration will be created in addition to the default port (`dotnet-diagnostic-<pid>-<epoch>`). The suspend mode of the default port is set via the new environment variable `DOTNET_DefaultDiagnosticPortSuspend` which defaults to `0` for `nosuspend`.
 
-...
+Each port configuration specifies whether it is a `suspend` or `nosuspend` port. Ports specifying `suspend` in their configuration will cause the runtime to pause early on in the startup path before most runtime subsystems have started. This allows any agent to receive a connection and properly setup before the application startup continues. Since multiple ports can individually request suspension, the `resume` command needs to be sent by each suspended port connection before the runtime resumes execution.
 
-runtime <- client : stop command
-runtime -> client : session id and stops
+If a config specifies multiple tag values from a tag type, for example  `"<path>,nosuspend,suspend,suspend,"`, only the first one is respected.
+
+The port address value is **required** for a port configuration. If a configuration doesn't specify an address and only specifies tags, then the first tag will be treated as the path. For example, the configuration `DOTNET_DiagnosticPorts=nosuspend,connect` would cause a port with the name `nosuspend` to be created, in the default `suspend` mode.
+
+The runtime will make a best effort attempt to generate a port from a port configuration. A bad port configuration won't cause an error state, but could lead to consumed resources. For example it could cause the runtime to continuously poll for a connect port that will never exist.
+
+When a Diagnostic Port is configured, the runtime will attempt to connect to the provided address in a retry loop while also listening on the traditional server. The retry loop has an initial timeout of 10ms with a falloff factor of 1.25x and a max timeout of 500 ms.  A successful connection will result in an infinite timeout.  The runtime is resilient to the remote end of the Diagnostic Port failing, e.g., closing, not `Accepting`, etc.
+
+## Advertise Protocol
+
+Upon successful connection, the runtime will send a fixed-size, 34 byte buffer containing the following information:
+
+ * `char[8] magic`: (8 bytes) `"ADVR_V1\0"` (ASCII chars + null byte)
+ * `GUID runtimeCookie`: (16 bytes) CLR Instance Cookie (little-endian)
+ * `uint64_t processId`: (8 bytes) PID (little-endian)
+ * `uint16_t future`: (2 bytes) unused for future-proofing
+
+With the following layout:
+
+<table>
+  <tr>
+    <th>1</th>
+    <th>2</th>
+    <th>3</th>
+    <th>4</th>
+    <th>5</th>
+    <th>6</th>
+    <th>7</th>
+    <th>8</th>
+    <th>9</th>
+    <th>10</th>
+    <th>11</th>
+    <th>12</th>
+    <th>13</th>
+    <th>14</th>
+    <th>15</th>
+    <th>16</th>
+    <th>17</th>
+    <th>18</th>
+    <th>19</th>
+    <th>20</th>
+    <th>21</th>
+    <th>22</th>
+    <th>23</th>
+    <th>24</th>
+    <th>25</th>
+    <th>26</th>
+    <th>27</th>
+    <th>28</th>
+    <th>29</th>
+    <th>30</th>
+    <th>31</th>
+    <th>32</th>
+    <th>33</th>
+    <th>34</th>
+  </tr>
+  <tr>
+    <td colspan="8">magic</td>
+    <td colspan="16">runtimeCookie</td>
+    <td colspan="8">processId</td>
+    <td colspan="2">future</td>
+  </tr>
+  <tr>
+    <td colspan="8">"ADVR_V1\0"</td>
+    <td colspan="16">123e4567-e89b-12d3-a456-426614174000</td>
+    <td colspan="8">12345</td>
+    <td colspan="2">0x0000</td>
+  </tr>
+</table>
+
+This is a one-way transmission with no expectation of an ACK.  The tool owning the Diagnostic Port is expected to consume this message and then hold on to the now active connection until it chooses to send a Diagnostics IPC command.
+
+## Dataflow
+
+Due to the potential for an *optional continuation* in the Diagnostics IPC Protocol, each successful connection between the runtime and a Diagnostic Port is only usable **once**.  As a result, a .NET process will attempt to _reconnect_ to the diagnostic port immediately after every command that is sent across an active connection.
+
+A typical dataflow has 2 actors, the Target application, `T` and the Diagnostics Monitor Application, `M`, and communicates like so:
 ```
+T ->   : Target attempts to connect to M, which may not exist yet
+// M comes into existence
+T -> M : [ Advertise ] - Target sends advertise message to Monitor
+// 0 or more time passes
+T <- M : [ Diagnostics IPC Protocol ] - Monitor sends a Diagnostics IPC Protocol command
+T -> M : [ Advertise ] - Target reconnects to Monitor with a _new_ connection and re-sends the advertise message
+```
+
+It is important to emphasize that a connection **_should not_** be reused for multiple Diagnostic IPC Protocol commands.

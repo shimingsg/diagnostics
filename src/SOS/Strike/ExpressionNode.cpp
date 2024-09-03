@@ -1,13 +1,12 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 #include "ExpressionNode.h"
 
-
-#ifndef IfFailRet
+#undef IfFailRet
 #define IfFailRet(EXPR) do { Status = (EXPR); if(FAILED(Status)) { return (Status); } } while (0)
-#endif
+
+ICorDebugProcess* ExpressionNode::s_pCorDebugProcess = nullptr;
 
 // Returns the complete expression being evaluated to get the value for this node
 // The returned pointer is a string interior to this object - once you release
@@ -45,8 +44,15 @@ WCHAR* ExpressionNode::GetErrorMessage() { return pErrorMessage; }
 // Factory function for creating the expression node at the root of a tree
 HRESULT ExpressionNode::CreateExpressionNode(__in_z WCHAR* pExpression, ExpressionNode** ppExpressionNode)
 {
+    _ASSERTE(g_pRuntime != nullptr);
     *ppExpressionNode = NULL;
-    HRESULT Status = CreateExpressionNodeHelper(pExpression,
+
+    HRESULT Status = g_pRuntime->GetCorDebugInterface(&s_pCorDebugProcess);
+    if (FAILED(Status)) {
+        return Status;
+    }
+
+    Status = CreateExpressionNodeHelper(pExpression,
         pExpression,
         0,
         NULL,
@@ -55,9 +61,9 @@ HRESULT ExpressionNode::CreateExpressionNode(__in_z WCHAR* pExpression, Expressi
         0,
         NULL,
         ppExpressionNode);
-    if(FAILED(Status) && *ppExpressionNode == NULL)
-    {
 
+    if (FAILED(Status) && *ppExpressionNode == NULL)
+    {
         WCHAR pErrorMessage[MAX_ERROR];
         _snwprintf_s(pErrorMessage, MAX_ERROR, _TRUNCATE, L"Error 0x%x while parsing expression", Status);
         *ppExpressionNode = new ExpressionNode(pExpression, pErrorMessage);
@@ -473,8 +479,8 @@ BOOL ExpressionNode::ShouldExpandVariable(__in_z WCHAR* varToExpand)
     if(pAbsoluteExpression == NULL || varToExpand == NULL) return FALSE;
 
     // if there is a cast operation, move past it
-    WCHAR* pEndCast = _wcschr(varToExpand, L')');
-    varToExpand = (pEndCast == NULL) ? varToExpand : pEndCast+1; 
+    const WCHAR* pEndCast = _wcschr(varToExpand, L')');
+    varToExpand = (pEndCast == NULL) ? varToExpand : (WCHAR*)(pEndCast+1);
 
     size_t varToExpandLen = _wcslen(varToExpand);
     size_t currentExpansionLen = _wcslen(pAbsoluteExpression);
@@ -627,8 +633,8 @@ HRESULT ExpressionNode::ExpandFields(ICorDebugValue* pInnerValue, __in_z WCHAR* 
     if(pBaseTypeNode == NULL) return Status;
     if(fieldExpanded) return Status;
 
-    WCHAR* pEndCast = _wcschr(varToExpand, L')');
-    WCHAR* pNonCast = (pEndCast == NULL) ? varToExpand : pEndCast+1;
+    const WCHAR* pEndCast = _wcschr(varToExpand, L')');
+    const WCHAR* pNonCast = (pEndCast == NULL) ? varToExpand : pEndCast+1;
     if(_wcscmp(pNonCast, pAbsoluteExpression) != 0)
     {
         pBaseTypeNode->Expand(varToExpand);
@@ -637,7 +643,7 @@ HRESULT ExpressionNode::ExpandFields(ICorDebugValue* pInnerValue, __in_z WCHAR* 
 
     if(varToExpand[0] == L'(' && pEndCast != NULL)
     {
-        int cchCastTypeName = ((int)(pEndCast-1)-(int)varToExpand)/2;
+        size_t cchCastTypeName = ((size_t)(pEndCast-1-varToExpand))/2;
         PopulateType();
         if(_wcslen(pTypeName) != (cchCastTypeName) ||
             _wcsncmp(varToExpand+1, pTypeName, cchCastTypeName) != 0)
@@ -914,7 +920,7 @@ HRESULT ExpressionNode::PopulateTextValueHelper()
 
     BOOL isNull = TRUE;
     ToRelease<ICorDebugValue> pInnerValue;
-    CorElementType corElemType;
+    CorElementType corElemType = ELEMENT_TYPE_MAX;
     ULONG32 cbSize = 0;
     if(pValue != NULL)
     {
@@ -946,7 +952,7 @@ HRESULT ExpressionNode::PopulateTextValueHelper()
         // one piece of data ICorDebugType will tell us if needed.
         if(FAILED(GetCanonicalElementTypeForTypeName(GetTypeName(), &corElemType)))
         {
-            pTypeCast->GetType(&corElemType);
+            IfFailRet(pTypeCast->GetType(&corElemType));
         }
 
         switch(corElemType)
@@ -1572,12 +1578,12 @@ HRESULT ExpressionNode::ParseNextIdentifier(__in_z WCHAR** expression, __inout_e
 
     WCHAR* expressionStart = *expression;
     DWORD currentCharsParsed = *charactersParsed;
-    DWORD identifierLen = (DWORD) _wcscspn(expressionStart, L".[");
+    DWORD identifierLen = (DWORD) wcscspn(expressionStart, L".[");
     // if the first character was a . or [ skip over it. Note that we don't
     // do this always in case the first WCHAR was part of a surrogate pair
     if(identifierLen == 0)
     {
-        identifierLen = (DWORD) _wcscspn(expressionStart+1, L".[") + 1;
+        identifierLen = (DWORD) wcscspn(expressionStart+1, L".[") + 1;
     }
 
     *expression += identifierLen;
@@ -1760,7 +1766,8 @@ HRESULT ExpressionNode::EnumerateFrames(FrameEnumCallback pCallback, VOID* pUser
     ULONG ulThreadID = 0;
     g_ExtSystem->GetCurrentThreadSystemId(&ulThreadID);
 
-    IfFailRet(g_pCorDebugProcess->GetThread(ulThreadID, &pThread));
+    _ASSERTE(s_pCorDebugProcess != nullptr);
+    IfFailRet(s_pCorDebugProcess->GetThread(ulThreadID, &pThread));
     IfFailRet(pThread->QueryInterface(IID_ICorDebugThread3, (LPVOID *) &pThread3));
     IfFailRet(pThread3->CreateStackWalk(&pStackWalk));
 
@@ -1788,7 +1795,7 @@ HRESULT ExpressionNode::EnumerateFrames(FrameEnumCallback pCallback, VOID* pUser
         CROSS_PLATFORM_CONTEXT context;
         ULONG32 cbContextActual;
         if ((Status=pStackWalk->GetContext(
-            DT_CONTEXT_FULL, 
+            g_targetMachine->GetFullContextFlags(), 
             sizeof(context),
             &cbContextActual,
             (BYTE *)&context))!=S_OK)
@@ -1980,7 +1987,8 @@ HRESULT ExpressionNode::FindTypeByName(__in_z const WCHAR* pTypeName, ICorDebugT
 {
     HRESULT Status = S_OK;
     ToRelease<ICorDebugAppDomainEnum> pAppDomainEnum;
-    IfFailRet(g_pCorDebugProcess->EnumerateAppDomains(&pAppDomainEnum));
+    _ASSERTE(s_pCorDebugProcess != nullptr);
+    IfFailRet(s_pCorDebugProcess->EnumerateAppDomains(&pAppDomainEnum));
     DWORD count;
     IfFailRet(pAppDomainEnum->GetCount(&count));
     for(DWORD i = 0; i < count; i++)
@@ -2053,7 +2061,7 @@ HRESULT ExpressionNode::FindTypeByName(ICorDebugModule* pModule, __in_z const WC
     WCHAR rootName[mdNameLen];
     const WCHAR* pRootName = NULL;
     int typeNameLen = (int) _wcslen(pTypeName);
-    int genericParamListStart = (int) _wcscspn(pTypeName, L"<");
+    int genericParamListStart = (int) wcscspn(pTypeName, L"<");
     if(genericParamListStart != typeNameLen)
     {
         if(pTypeName[typeNameLen-1] != L'>' || genericParamListStart > mdNameLen)
@@ -2143,23 +2151,23 @@ HRESULT ExpressionNode::IsTokenValueTypeOrEnum(mdToken token, IMetaDataImport* p
     {
         ULONG chTypeDef;
         pMetadata->GetTypeRefProps(token, NULL, NULL, 0, &chTypeDef);
-        if(chTypeDef > _countof(nameBuffer))
+        if(chTypeDef > ARRAY_SIZE(nameBuffer))
         {
             *pResult = FALSE;
             return Status;
         }
-        IfFailRet(pMetadata->GetTypeRefProps(token, NULL, nameBuffer, _countof(nameBuffer), &chTypeDef));
+        IfFailRet(pMetadata->GetTypeRefProps(token, NULL, nameBuffer, ARRAY_SIZE(nameBuffer), &chTypeDef));
     }
     else if(type == mdtTypeDef)
     {
         ULONG chTypeDef;
         pMetadata->GetTypeDefProps(token, NULL, 0, &chTypeDef, NULL, NULL);
-        if(chTypeDef > _countof(nameBuffer))
+        if(chTypeDef > ARRAY_SIZE(nameBuffer))
         {
             *pResult = FALSE;
             return Status;
         }
-        IfFailRet(pMetadata->GetTypeDefProps(token, nameBuffer, _countof(nameBuffer), &chTypeDef, NULL, NULL));
+        IfFailRet(pMetadata->GetTypeDefProps(token, nameBuffer, ARRAY_SIZE(nameBuffer), &chTypeDef, NULL, NULL));
     }
 
     if(_wcscmp(nameBuffer, L"System.ValueType") == 0 ||

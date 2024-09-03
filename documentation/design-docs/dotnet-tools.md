@@ -1,4 +1,5 @@
-﻿# Dotnet Diagnostic Tools CLI Design
+For the latest public documentation on using dotnet-* diagnostic tools see [dotnet-trace](https://learn.microsoft.com/dotnet/core/diagnostics/dotnet-trace), [dotnet-counters](https://learn.microsoft.com/dotnet/core/diagnostics/dotnet-counters), [dotnet-dump](https://learn.microsoft.com/dotnet/core/diagnostics/dotnet-dump), [dotnet-gcdump](https://learn.microsoft.com/dotnet/core/diagnostics/dotnet-gcdump), [dotnet-dsrouter](https://learn.microsoft.com/dotnet/core/diagnostics/dotnet-dsrouter), [dotnet-monitor](https://learn.microsoft.com/dotnet/core/diagnostics/dotnet-monitor), [dotnet-symbol](https://learn.microsoft.com/dotnet/core/diagnostics/dotnet-symbol), [dotnet-sos](https://learn.microsoft.com/dotnet/core/diagnostics/dotnet-sos).
+# Dotnet Diagnostic Tools CLI Design 
 
 ## User workflows
 
@@ -49,7 +50,7 @@ For analyzing CPU usage, IO, lock contention, allocation rate, etc the investiga
 
 **Convert a trace to use with speedscope**
 
-    > dotnet trace convert ~/trace.nettrace --to-speedscope
+    > dotnet trace convert ~/trace.nettrace --format Speedscope
     Writing:     ~/trace.speedscope.json
     Conversion complete
 
@@ -199,7 +200,7 @@ MONITOR
         CPU Usage (%)                                 24
         GC Heap Size (MB)                            811
 
-    3. Monitoring EventCounter values from user-defined EventSource: (see https://github.com/dotnet/corefx/blob/master/src/System.Diagnostics.Tracing/documentation/EventCounterTutorial.md on how to do this.0)
+    3. Monitoring EventCounter values from user-defined EventSource: (see https://github.com/dotnet/corefx/blob/main/src/System.Diagnostics.Tracing/documentation/EventCounterTutorial.md on how to do this.0)
 
       > dotnet-counters monitor --processId 1902 Samples-EventCounterDemos-Minimal
 
@@ -297,10 +298,11 @@ OPTIONS
 
 COMMANDS
 
-    collect         Collects a diagnostic trace from a currently running process
+    collect         Collects a diagnostic trace from a currently running process.
     ps              Lists dotnet processes that can be attached to.
     list-profiles   Lists pre-built tracing profiles with a description of what providers and filters are in each profile.
-    convert         Converts traces to alternate formats for use with alternate trace analysis tools
+    convert         Converts traces to alternate formats for use with alternate trace analysis tools.
+    report          Generate a report into stdout from a previously generated trace.
 
 COLLECT
 
@@ -311,7 +313,7 @@ COLLECT
                          [--providers <list-of-comma-separated-providers>]
                          [--format <trace-file-format>]
 
-    Collects a diagnostic trace from a currently running process
+    Collects a diagnostic trace from a currently running process or launch a child process and trace it. Append -- to the collect command to instruct the tool to run a command and trace it immediately.
 
     -p, --process-id
         The process to collect the trace from
@@ -351,6 +353,8 @@ COLLECT
     --format
         The format of the output trace file. The default value is nettrace.
 
+    --show-child-io
+        Shows the input and output streams of a launched child process in the current console.
 
     Examples:
       
@@ -395,6 +399,122 @@ CONVERT
       > dotnet-trace convert trace.nettrace -f speedscope
       Writing:       ./trace.speedscope.json
       Conversion complete
+
+REPORT
+
+    dotnet-trace report [-h|--help]
+
+                        <trace_file_path>
+
+    Generate report into stdout from a previously generated trace.
+
+    -h, --help
+        Show command line help, including available report types  
+
+    <trace_file_path>
+        The path to the trace file that will be read to generate the report.
+
+        TOPN
+
+        dotnet-trace report topN [-h|--help]
+                                 [-n|--number]
+                                 [--inclusive]
+                                 <trace_file_path>
+        Generate a report containing the top N methods that were on the stack the longest.
+
+        -h, --help
+            Show command line help;
+
+        -n, --number
+            Number of top methods(methods that have inclusively/exclusively been on the stack the longest) to display in the report
+
+        --inclusive
+            Output the top n methods based on inclusive time. If not specified, exclusive time is used by default.
+
+        Examples:
+        > dotnet-trace report topN -n 3 --inclusive ./mytrace.nettrace
+
+        Top 3 Functions (Inclusive):
+        Function                                   Inclusive       Exclusive
+        1. FirstFunction(...) <IL offset etc.>     75% (430,842)   22% (103,436)
+        2. ...
+        3. ...
+
+
+### dotnet-stack
+
+SYNOPSIS
+
+    dotnet-stack [options] [command] [<args>]
+
+OPTIONS
+
+    --version
+        Display the version of the dotnet-trace utility.
+
+    -h, --help
+        Show command line help
+
+COMMANDS
+
+    report         Displays stack traces for the target process
+
+REPORT
+
+    dotnet-stack report -p|--process-id <pid>
+                        -n|--name <process-name>
+                        [-h|--help]
+
+    Prints the managed stack from every thread in the target process
+
+    -h, --help
+        Show command line help
+
+    Examples:
+      > dotnet-stack report -p 1234
+      Thread (0x151c):
+          [Native Frames]
+          System.Private.CoreLib!System.Threading.ManualResetEventSlim.Wait(int, System.Threading.CancellationToken)
+          System.Private.CoreLib!System.Threading.Tasks.Task.SpinThenBlockingWait(int, System.Threading.CancellationToken)
+          System.Private.CoreLib!System.Threading.Tasks.Task.InternalWaitCore(int, System.Threading.CancellationToken)
+          System.Private.CoreLib!System.Runtime.CompilerServices.TaskAwaiter.HandleNonSuccessAndDebuggerNotification(System.Threading.Tasks.Task)
+          System.Private.CoreLib!System.Runtime.CompilerServices.TaskAwaiter.GetResult()
+          Microsoft.Extensions.Hosting.Abstractions!Microsoft.Extensions.Hosting.HostingAbstractionsHostExtensions.Run(Microsoft.Extensions.Hosting.IHost)
+          testtesttest!testtesttest.Program.Main(System.String[])
+
+      Thread (0x152b):
+          [Native Frames]
+          System.IO.FileSystem.Watcher!System.IO.FileSystemWatcher.RunningInstance.StaticWatcherRunLoopManager.WatchForFileSystemEventsThreadStart(System.Threading.ManualResetEventSlim, Microsoft.Win32.SafeHandles.SafeEventStreamHandle)
+          System.IO.FileSystem.Watcher!System.IO.FileSystemWatcher.RunningInstance.StaticWatcherRunLoopManager.<>c.<ScheduleEventStream>(System.Object)
+          System.Private.CoreLib!System.Threading.ThreadHelper.ThreadStart_Context(System.Object)
+          System.Private.CoreLib!System.Threading.ExecutionContext.RunInternal(System.Threading.ExecutionContext, System.Threading.ContextCallback, System.Object)
+          System.Private.CoreLib!System.Threading.ThreadHelper.ThreadStart(System.Object)
+
+      Thread (0x153a):
+          [Native Frames]
+          System.Private.CoreLib!System.Threading.SemaphoreSlim.WaitUntilCountOrTimeout(int, uint, System.Threading.CancellationToken)
+          System.Private.CoreLib!System.Threading.SemaphoreSlim.Wait(int, System.Threading.CancellationToken)
+          System.Collections.Concurrent!System.Collections.Concurrent.BlockingCollection<Microsoft.Extensions.Logging.Console.LogMessageEntry>.TryTakeWithNoTimeValidation(int, System.Threading.CancellationToken, System.Threading.CancellationTokenSource)
+          System.Collections.Concurrent!System.Collections.Concurrent.BlockingCollection<Microsoft.Extensions.Logging.Console.LogMessageEntry>.GetConsumingEnumerable().MoveNext()
+          Microsoft.Extensions.Logging.Console!Microsoft.Extensions.Logging.Console.ConsoleLoggerProcessor.ProcessLogQueue()
+          System.Private.CoreLib!System.Threading.ThreadHelper.ThreadStart_Context(System.Object)
+          System.Private.CoreLib!System.Threading.ExecutionContext.RunInternal(System.Threading.ExecutionContext, System.Threading.ContextCallback, System.Object)
+          System.Private.CoreLib!System.Threading.ThreadHelper.ThreadStart()
+
+      Thread (0x4125):
+          [Native Frames]
+          System.Private.CoreLib!System.Threading.Thread.Sleep(System.TimeSpan)
+          Microsoft.AspNetCore.Server.Kestrel.Core!Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure.Heartbeat.TimerLoop()
+          Microsoft.AspNetCore.Server.Kestrel.Core!Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure.Heartbeat.ctor(System.Object)
+          System.Private.CoreLib!System.Threading.ThreadHelper.ThreadStart_Context(System.Object)
+          System.Private.CoreLib!System.Threading.ExecutionContext.RunInternal(System.Threading.ExecutionContext, System.Threading.ContextCallback, System.Object)
+          System.Private.CoreLib!System.Threading.ThreadHelper.ThreadStart(System.Object)
+
+      Thread (0x5hf3):
+          [Native Frames]
+          System.Net.Sockets!System.Net.Sockets.SocketAsyncEngine.EventLoop()
+          System.Net.Sockets!System.Net.Sockets.SocketAsyncEngine.ctor( System.Object)
+          System.Private.CoreLib!System.Threading.ThreadHelper.ThreadStart(System.Object)
 
 ### dotnet-dump
 
@@ -612,6 +732,100 @@ UNINSTALL
       Reverting .lldbinit - LLDB will no longer load SOS at startup
       Uninstalling SOS from ~/.dotnet/sos
       Complete
+
+### dotnet-gcdump
+
+SYNOPSIS
+
+    dotnet-gcdump [--version]
+                  [-h, --help]
+                  <command> [<args>]
+
+OPTIONS
+
+    --version
+        Display the version of the dotnet-gcdump utility.
+
+    -h, --help
+        Show command line help
+
+COMMANDS
+
+    collect   Capture dumps from a process
+    report    Generate report into stdout from a previously generated gcdump or from a running process.
+
+COLLECT
+
+    dotnet-gcdump collect -p|--process-id <pid> [-h|--help] [-o|--output <output_dump_path>] [-v|--verbose]
+
+    Capture GC dumps from a dotnet process
+
+    Usage:
+      dotnet-gcdump collect [options]
+
+    Options:
+      -p, --process-id
+          The process to collect a gc dump from.
+
+      -h, --help
+          Show command line help
+
+      -o, --output
+          The path where collected gcdumps should be written. Defaults to '.\YYYYMMDD_HHMMSS_<pid>.gcdump' where YYYYMMDD is Year/Month/Day
+          and HHMMSS is Hour/Minute/Second. Otherwise, it is the full path and file name of the dump.
+      
+      -v, --verbose
+          Turns on logging for gcdump
+
+Examples:
+
+    $ dotnet gcdump collect --process-id 1902
+    Writing gcdump to file ./20190226_135837_1902.gcdump
+    Wrote 12576 bytes to file
+    Complete
+
+REPORT
+
+    dotnet-gcdump report <gcdump_filename>
+    
+    Generate report into stdout from a previously generated gcdump or from a running process.
+    
+    Usage:
+      dotnet-gcdump report [options] [<gcdump_filename>]
+
+    Arguments:
+      <gcdump_filename>  The file to read gcdump from.
+  
+    Options:
+      -p, --process-id   The process id to collect the trace.
+      -t, --report-type  The type of report to generate. Available options: heapstat (default)
+
+Examples:
+
+    $ dotnet gcdump report 20200207_094403_19847.gcdump
+      4,786,378  GC Heap bytes
+         63,201  GC Heap objects
+
+    Object Bytes     Count  Type
+         131,096         1  System.Byte[] (Bytes > 100K)  [System.Private.CoreLib.dll]
+          57,756         1  System.String (Bytes > 10K)  [System.Private.CoreLib.dll]
+          31,128         1  System.Int32[] (Bytes > 10K)  [System.Private.CoreLib.dll]
+          28,605         5  System.Byte[] (Bytes > 10K)  [System.Private.CoreLib.dll]
+          22,432         9  System.Object[] (Bytes > 10K)  [System.Private.CoreLib.dll]
+    ...
+
+    $ dotnet gcdump report -p 1752 | head -9
+      1,302,804  GC Heap bytes
+         16,211  GC Heap objects
+         27,858  Total references
+
+    Object Bytes     Count  Type
+          31,128         1  System.Int32[] (Bytes > 10K)  [System.Private.CoreLib.dll]
+          24,468         1  System.String (Bytes > 10K)  [System.Private.CoreLib.dll]
+          12,800         3  System.Object[] (Bytes > 10K)  [System.Private.CoreLib.dll]
+           7,904         1  Entry<System.String,System.Drawing.Color>[] (Bytes > 1K)  [System.Private.CoreLib.dll]
+           7,074         4  System.String (Bytes > 1K)  [System.Private.CoreLib.dll]
+    ...
 
 ## Future suggestions
 
@@ -1026,7 +1240,7 @@ perf top monitors a machine and shows an updating console UI with the most expen
 
 ### Pprof
 
-Pprof is both a runtime library used by golang to collect trace data as well as a CLI tool to visualize that data after it has been collected. The CLI tool is the focus here. Snippets below from https://github.com/google/pprof/blob/master/doc/README.md
+Pprof is both a runtime library used by golang to collect trace data as well as a CLI tool to visualize that data after it has been collected. The CLI tool is the focus here. Snippets below from https://github.com/google/pprof/blob/main/doc/README.md
 
 Pprof follows the convention Pprof <format\> [options] source.
 
@@ -1169,7 +1383,7 @@ d
     -g
     Run as a native debugger in a managed process (no interop).
     -h
-    Write dump if process has a hung window (does not respond to window messages for at least 5 seconds).
+    Write dump if process has an unresponsive window (does not respond to window messages for at least 5 seconds).
     -i
     Install ProcDump as the AeDebug postmortem debugger. Only -ma, -mp, -d and -r are supported as additional options.
     -l

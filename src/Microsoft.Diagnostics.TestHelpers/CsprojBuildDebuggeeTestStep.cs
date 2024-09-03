@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System.Collections.Generic;
 using System.IO;
@@ -27,21 +26,24 @@ namespace Microsoft.Diagnostics.TestHelpers
         /// </param>
         public CsprojBuildDebuggeeTestStep(string dotnetToolPath,
                                        string templateSolutionDirPath,
+                                       string debuggeeMsbuildAuxRoot,
                                        string debuggeeNativeLibDirPath,
-                                       Dictionary<string,string> buildProperties,
+                                       Dictionary<string, string> buildProperties,
                                        string runtimeIdentifier,
+                                       string runtimeFramework,
                                        string linkerPackageVersion,
-                					   string debuggeeName,
+                                       string debuggeeName,
                                        string debuggeeSolutionDirPath,
                                        string debuggeeProjectDirPath,
                                        string debuggeeBinaryDirPath,
                                        string debuggeeBinaryDllPath,
                                        string debuggeeBinaryExePath,
                                        string nugetPackageCacheDirPath,
-                                       Dictionary<string,string> nugetFeeds,
+                                       Dictionary<string, string> nugetFeeds,
                                        string logPath) :
             base(dotnetToolPath,
                  templateSolutionDirPath,
+                 debuggeeMsbuildAuxRoot,
                  debuggeeNativeLibDirPath,
                  debuggeeSolutionDirPath,
                  debuggeeProjectDirPath,
@@ -54,6 +56,7 @@ namespace Microsoft.Diagnostics.TestHelpers
         {
             BuildProperties = buildProperties;
             RuntimeIdentifier = runtimeIdentifier;
+            RuntimeFramework = runtimeFramework;
             DebuggeeName = debuggeeName;
             ProjectTemplateFileName = debuggeeName + ".csproj";
             LinkerPackageVersion = linkerPackageVersion;
@@ -62,8 +65,9 @@ namespace Microsoft.Diagnostics.TestHelpers
         /// <summary>
         /// A mapping from .csproj property strings to their values. These properties will be set when building the debuggee.
         /// </summary>
-        public IDictionary<string,string> BuildProperties { get; }
+        public IDictionary<string, string> BuildProperties { get; }
         public string RuntimeIdentifier { get; }
+        public string RuntimeFramework { get; }
         public string DebuggeeName { get; }
         public string LinkerPackageVersion { get; }
         public override string ProjectTemplateFileName { get; }
@@ -73,27 +77,32 @@ namespace Microsoft.Diagnostics.TestHelpers
             string extraArgs = "";
             if (RuntimeIdentifier != null)
             {
-                extraArgs = " --runtime " + RuntimeIdentifier;
+                extraArgs += " --runtime " + RuntimeIdentifier;
             }
-            foreach (var prop in BuildProperties)
+            foreach (KeyValuePair<string, string> prop in BuildProperties)
             {
                 extraArgs += $" /p:{prop.Key}={prop.Value}";
             }
-            await Restore(extraArgs, output);
+            await Restore(extraArgs, output).ConfigureAwait(false);
         }
 
         protected override async Task Build(ITestOutputHelper output)
         {
-            string publishArgs = "publish";
+            string publishArgs = "publish --configuration Debug";
+            if (RuntimeFramework != null)
+            {
+                publishArgs += " --framework " + RuntimeFramework;
+            }
             if (RuntimeIdentifier != null)
             {
                 publishArgs += " --runtime " + RuntimeIdentifier;
+                publishArgs += " --self-contained true";
             }
-            foreach (var prop in BuildProperties)
+            foreach (KeyValuePair<string, string> prop in BuildProperties)
             {
                 publishArgs += $" /p:{prop.Key}={prop.Value}";
             }
-            await Build(publishArgs, output);
+            await Build(publishArgs, output).ConfigureAwait(false);
         }
 
         protected override void ExpandProjectTemplate(string filePath, string destDirPath, ITestOutputHelper output)
@@ -103,13 +112,13 @@ namespace Microsoft.Diagnostics.TestHelpers
 
         private void ConvertCsprojTemplate(string csprojTemplatePath, string csprojOutPath)
         {
-            var xdoc = XDocument.Load(csprojTemplatePath);
-            var ns = xdoc.Root.GetDefaultNamespace();
+            XDocument xdoc = XDocument.Load(csprojTemplatePath);
+            XNamespace ns = xdoc.Root.GetDefaultNamespace();
             if (LinkerPackageVersion != null)
             {
                 AddLinkerPackageReference(xdoc, ns, LinkerPackageVersion);
             }
-            using (var fs = new FileStream(csprojOutPath, FileMode.Create))
+            using (FileStream fs = new(csprojOutPath, FileMode.Create))
             {
                 xdoc.Save(fs);
             }

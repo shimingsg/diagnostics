@@ -1,6 +1,5 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 using System.Collections.Generic;
@@ -16,7 +15,7 @@ namespace Microsoft.Diagnostics.Tools.Counters
         public string Level { get; }
         public Dictionary<string, CounterProfile> Counters { get; }
 
-        public CounterProvider(string name, string description, string keywords, string level, IEnumerable<CounterProfile> counters)
+        public CounterProvider(string name, string description, string keywords, string level, IEnumerable<CounterProfile> counters, string version)
         {
             Name = name;
             Description = description;
@@ -25,15 +24,11 @@ namespace Microsoft.Diagnostics.Tools.Counters
             Counters = new Dictionary<string, CounterProfile>();
             foreach (CounterProfile counter in counters)
             {
-                Counters.Add(counter.Name, counter);
+                if (counter.SupportedVersions.Contains(version))
+                {
+                    Counters.Add(counter.Name, counter);
+                }
             }
-        }
-
-        public string TryGetDisplayName(string counterName)
-        {
-            if (Counters.ContainsKey(counterName))
-                return Counters[counterName].DisplayName;
-            return null;
         }
 
         public string ToProviderString(int interval)
@@ -41,19 +36,13 @@ namespace Microsoft.Diagnostics.Tools.Counters
             return $"{Name}:{Keywords}:{Level}:EventCounterIntervalSec={interval}";
         }
 
-        public static string SerializeUnknownProviderName(string unknownCounterProviderName, int interval)
-        {
-            return $"{unknownCounterProviderName}:ffffffff:4:EventCounterIntervalSec={interval}";
-        }
-
         public IReadOnlyList<CounterProfile> GetAllCounters() => Counters.Values.ToList();
-
     }
 
     public class CounterProfile
     {
         public string Name { get; set; }
-        public string DisplayName { get; set; }
         public string Description { get; set; }
+        public string[] SupportedVersions { get; set; }
     }
 }

@@ -1,15 +1,13 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
-using Microsoft.Diagnostics.Tools.RuntimeClient;
 using System;
 using System.CommandLine;
-using System.Diagnostics;
+using System.CommandLine.IO;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Threading;
-using System.Threading.Tasks;
+using Microsoft.Diagnostics.NETCore.Client;
+using Microsoft.Internal.Common.Utils;
 
 namespace Microsoft.Diagnostics.Tools.Dump
 {
@@ -20,20 +18,47 @@ namespace Microsoft.Diagnostics.Tools.Dump
         /// </summary>
         public enum DumpTypeOption
         {
-            Heap,       // A large and relatively comprehensive dump containing module lists, thread lists, all 
+            Full,       // The largest dump containing all memory including the module images.
+
+            Heap,       // A large and relatively comprehensive dump containing module lists, thread lists, all
                         // stacks, exception information, handle information, and all memory except for mapped images.
-            Mini        // A small dump containing module lists, thread lists, exception information and all stacks.
+
+            Mini,       // A small dump containing module lists, thread lists, exception information and all stacks.
+
+            Triage      // A small dump containing module lists, thread lists, exception information, all stacks and PII removed.
         }
 
         public Dumper()
         {
         }
 
-        public async Task<int> Collect(IConsole console, int processId, string output, bool diag, DumpTypeOption type)
+        public int Collect(IConsole console, int processId, string output, bool diag, bool crashreport, DumpTypeOption type, string name)
         {
-            if (processId == 0) {
-                console.Error.WriteLine("ProcessId is required.");
-                return 1;
+            Console.WriteLine(name);
+            if (name != null)
+            {
+                if (processId != 0)
+                {
+                    Console.WriteLine("Can only specify either --name or --process-id option.");
+                    return -1;
+                }
+                processId = CommandUtils.FindProcessIdWithName(name);
+                if (processId < 0)
+                {
+                    return -1;
+                }
+            }
+
+            if (processId == 0)
+            {
+                Console.Error.WriteLine("ProcessId is required.");
+                return -1;
+            }
+
+            if (processId < 0)
+            {
+                Console.Error.WriteLine($"The PID cannot be negative: {processId}");
+                return -1;
             }
 
             try
@@ -44,47 +69,87 @@ namespace Microsoft.Diagnostics.Tools.Dump
                     string timestamp = $"{DateTime.Now:yyyyMMdd_HHmmss}";
                     output = Path.Combine(Directory.GetCurrentDirectory(), RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? $"dump_{timestamp}.dmp" : $"core_{timestamp}");
                 }
-                // Make sure the dump path is NOT relative. This path could be sent to the runtime 
+                // Make sure the dump path is NOT relative. This path could be sent to the runtime
                 // process on Linux which may have a different current directory.
                 output = Path.GetFullPath(output);
 
                 // Display the type of dump and dump path
-                string dumpTypeMessage = type == DumpTypeOption.Mini ? "minidump" : "minidump with heap";
+                string dumpTypeMessage = null;
+                switch (type)
+                {
+                    case DumpTypeOption.Full:
+                        dumpTypeMessage = "full";
+                        break;
+                    case DumpTypeOption.Heap:
+                        dumpTypeMessage = "dump with heap";
+                        break;
+                    case DumpTypeOption.Mini:
+                        dumpTypeMessage = "dump";
+                        break;
+                    case DumpTypeOption.Triage:
+                        dumpTypeMessage = "triage dump";
+                        break;
+                }
                 console.Out.WriteLine($"Writing {dumpTypeMessage} to {output}");
 
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 {
-                    // Get the process
-                    Process process = Process.GetProcessById(processId);
-
-                    await Windows.CollectDumpAsync(process, output, type);
-                }
-                else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-                {
-                    DiagnosticsHelpers.DumpType dumpType = type == DumpTypeOption.Heap ? DiagnosticsHelpers.DumpType.WithHeap : DiagnosticsHelpers.DumpType.Normal;
-
-                    // Send the command to the runtime to initiate the core dump
-                    var hr = DiagnosticsHelpers.GenerateCoreDump(processId, output, dumpType, diag);
-                    if (hr != 0)
+                    if (crashreport)
                     {
-                        throw new InvalidOperationException($"Core dump generation FAILED 0x{hr:X8}");
+                        Console.WriteLine("Crash reports not supported on Windows.");
+                        return -1;
                     }
+
+                    Windows.CollectDump(processId, output, type);
                 }
-                else {
-                    throw new PlatformNotSupportedException($"Unsupported operating system: {RuntimeInformation.OSDescription}");
+                else
+                {
+                    DiagnosticsClient client = new(processId);
+
+                    DumpType dumpType = DumpType.Normal;
+                    switch (type)
+                    {
+                        case DumpTypeOption.Full:
+                            dumpType = DumpType.Full;
+                            break;
+                        case DumpTypeOption.Heap:
+                            dumpType = DumpType.WithHeap;
+                            break;
+                        case DumpTypeOption.Mini:
+                            dumpType = DumpType.Normal;
+                            break;
+                        case DumpTypeOption.Triage:
+                            dumpType = DumpType.Triage;
+                            break;
+                    }
+
+                    WriteDumpFlags flags = WriteDumpFlags.None;
+                    if (diag)
+                    {
+                        flags |= WriteDumpFlags.LoggingEnabled;
+                    }
+                    if (crashreport)
+                    {
+                        flags |= WriteDumpFlags.CrashReportEnabled;
+                    }
+                    // Send the command to the runtime to initiate the core dump
+                    client.WriteDump(dumpType, output, flags);
                 }
             }
-            catch (Exception ex) when 
-                (ex is FileNotFoundException || 
-                 ex is DirectoryNotFoundException || 
-                 ex is UnauthorizedAccessException || 
-                 ex is PlatformNotSupportedException || 
-                 ex is InvalidDataException ||
-                 ex is InvalidOperationException ||
-                 ex is NotSupportedException)
+            catch (Exception ex) when
+                (ex is FileNotFoundException or
+                 ArgumentException or
+                 DirectoryNotFoundException or
+                 UnauthorizedAccessException or
+                 PlatformNotSupportedException or
+                 UnsupportedCommandException or
+                 InvalidDataException or
+                 InvalidOperationException or
+                 NotSupportedException or
+                 DiagnosticsClientException)
             {
                 console.Error.WriteLine($"{ex.Message}");
-                return 1;
+                return -1;
             }
 
             console.Out.WriteLine($"Complete");

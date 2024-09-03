@@ -1,5 +1,4 @@
-﻿<!-- Copyright (c)  Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information. -->
-<Project>
+﻿<Project>
   <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
 
   <PropertyGroup>
@@ -11,20 +10,25 @@
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SOSPackagePathPrefix>tools</SOSPackagePathPrefix>
     <GalleryManifestName>$(ArtifactsPackagesDir)\GalleryManifest.xml</GalleryManifestName>
-    <BeforePack>GenerateGalleryZip;GenerateSymbolsZip</BeforePack>
+    <BeforePack>GenerateGalleryManifest</BeforePack>
+    <IsShipping>true</IsShipping>
+    <IsShippingPackage>false</IsShippingPackage>
   </PropertyGroup>
-
-  <ItemGroup>
-    <None Include="$(GalleryManifestName)" Pack="true" Visible="false">
-      <PackagePath>$(SOSPackagePathPrefix)</PackagePath>
-    </None>
-  </ItemGroup>
-
+    
   <Import Project="$(MSBuildThisFileDirectory)..\..\sos-packaging.props" />
 
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
 
   <Target Name="Build" />
+
+  <ItemGroup>
+    <None Include="$(GalleryManifestName)" Pack="true" Visible="false">
+      <PackagePath>$(SOSPackagePathPrefix)</PackagePath>
+    </None>
+    <None Include="$(SOSExtensionsBinaries)" Pack="true" Visible="false">
+      <PackagePath>$(SOSPackagePathPrefix)/lib</PackagePath>
+    </None>
+  </ItemGroup>
 
   <Target Name="GenerateGalleryManifest" DependsOnTargets="GetAssemblyVersion;AddSourceRevisionToInformationalVersion">
     <PropertyGroup>
@@ -41,10 +45,21 @@
                 <File Architecture="amd64" Module="win-x64\sos.dll" />
                 <File Architecture="x86"   Module="win-x86\sos.dll" />
                 <File Architecture="arm32" Module="win-arm\sos.dll" />
+                <File Architecture="arm64" Module="win-arm64\sos.dll" />
             </Files>
             <LoadTriggers>
                 <TriggerSet>
                     <ModuleTrigger Name="coreclr.dll" />
+                </TriggerSet>
+                <TriggerSet>
+                    <ModuleTrigger Name="libcoreclr.so" />
+                </TriggerSet>
+                <TriggerSet>
+                  <ExceptionTrigger ExceptionCode="0xC0000409" >
+                    <Parameters>
+                      <Parameter Index="0" Value="0x48"/>
+                    </Parameters>
+                  </ExceptionTrigger>
                 </TriggerSet>
             </LoadTriggers>
             <EngineCommands>
@@ -67,82 +82,6 @@
     <ItemGroup>
       <FileWrites Include="$(GalleryManifestName)" />
     </ItemGroup>
-  </Target>
-
-  <Target Name="GenerateGalleryZip" DependsOnTargets="GenerateGalleryManifest">
-    <PropertyGroup>
-      <GalleryDir>$(ArtifactsBinDir)\gallery</GalleryDir>
-      <GallerySubDir>$(GalleryDir)\$(FileVersion)</GallerySubDir>
-      <SOSNETCorePath>$(ArtifactsBinDir)\SOS.NETCore\$(Configuration)\netstandard2.0\publish</SOSNETCorePath>
-    </PropertyGroup>
-
-    <ItemGroup>
-      <ZipSourceFiles Include="$(GalleryManifestName)">
-         <TargetPath>$(GalleryDir)</TargetPath>
-      </ZipSourceFiles>
-
-      <ZipSourceFiles Include="$(ArtifactsBinDir)Windows_NT.x64.$(Configuration)\sos.dll">
-         <TargetPath>$(GallerySubDir)\win-x64</TargetPath>
-      </ZipSourceFiles>
-      <ZipSourceFiles Include="$(ArtifactsBinDir)Windows_NT.x64.$(Configuration)\Microsoft.DiaSymReader.Native.amd64.dll">
-         <TargetPath>$(GallerySubDir)\win-x64</TargetPath>
-      </ZipSourceFiles>
-      <ZipSourceFiles Include="$(SOSNETCorePath)\*.dll">
-         <TargetPath>$(GallerySubDir)\win-x64</TargetPath>
-      </ZipSourceFiles>
-
-      <ZipSourceFiles Include="$(ArtifactsBinDir)Windows_NT.x86.$(Configuration)\sos.dll">
-         <TargetPath>$(GallerySubDir)\win-x86</TargetPath>
-      </ZipSourceFiles>
-      <ZipSourceFiles Include="$(ArtifactsBinDir)Windows_NT.x86.$(Configuration)\Microsoft.DiaSymReader.Native.x86.dll">
-         <TargetPath>$(GallerySubDir)\win-x86</TargetPath>
-      </ZipSourceFiles>
-      <ZipSourceFiles Include="$(SOSNETCorePath)\*.dll">
-         <TargetPath>$(GallerySubDir)\win-x86</TargetPath>
-      </ZipSourceFiles>
-
-      <ZipSourceFiles Include="$(ArtifactsBinDir)Windows_NT.arm.$(Configuration)\sos.dll">
-         <TargetPath>$(GallerySubDir)\win-arm</TargetPath>
-      </ZipSourceFiles>
-      <ZipSourceFiles Include="$(ArtifactsBinDir)Windows_NT.arm.$(Configuration)\Microsoft.DiaSymReader.Native.arm.dll">
-         <TargetPath>$(GallerySubDir)\win-arm</TargetPath>
-      </ZipSourceFiles>
-      <ZipSourceFiles Include="$(SOSNETCorePath)\*.dll">
-         <TargetPath>$(GallerySubDir)\win-arm</TargetPath>
-      </ZipSourceFiles>
-    </ItemGroup>
-
-    <Copy SourceFiles="@(ZipSourceFiles)" DestinationFolder="%(ZipSourceFiles.TargetPath)" />
-
-    <ZipDirectory DestinationFile="$(ArtifactsPackagesDir)$(FileVersion).zip" SourceDirectory="$(GalleryDir)" Overwrite="true" />
-  </Target>
-
-  <Target Name="GenerateSymbolsZip">
-    <PropertyGroup>
-      <SymbolsDir>$(ArtifactsBinDir)\symbols</SymbolsDir>
-    </PropertyGroup>
-
-    <ItemGroup>
-      <ZipSymbolFiles Include="$(ArtifactsSymStoreDirectory)\SOS.NETCore\netstandard2.0\*.pdb">
-         <TargetPath>$(SymbolsDir)</TargetPath>
-      </ZipSymbolFiles>
-
-      <ZipSymbolFiles Include="$(ArtifactsBinDir)Windows_NT.x64.$(Configuration)\sos.pdb">
-         <TargetPath>$(SymbolsDir)\win-x64</TargetPath>
-      </ZipSymbolFiles>
-
-      <ZipSymbolFiles Include="$(ArtifactsBinDir)Windows_NT.x86.$(Configuration)\sos.pdb">
-         <TargetPath>$(SymbolsDir)\win-x86</TargetPath>
-      </ZipSymbolFiles>
-
-      <ZipSymbolFiles Include="$(ArtifactsBinDir)Windows_NT.arm.$(Configuration)\sos.pdb">
-         <TargetPath>$(SymbolsDir)\win-arm</TargetPath>
-      </ZipSymbolFiles>
-    </ItemGroup>
-
-    <Copy SourceFiles="@(ZipSymbolFiles)" DestinationFolder="%(ZipSymbolFiles.TargetPath)" />
-
-    <ZipDirectory DestinationFile="$(ArtifactsPackagesDir)$(FileVersion).symbols.zip" SourceDirectory="$(SymbolsDir)" Overwrite="true" />
   </Target>
 
 </Project>

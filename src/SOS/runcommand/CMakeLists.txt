@@ -7,9 +7,6 @@ include_directories("$ENV{VSInstallDir}/DIA SDK/include")
 
 add_definitions(-DUSE_STL)
 
-#use static crt
-add_definitions(-MT) 
-
 set(RUNCOMMAND_SOURCES
     runcommand.cpp
 )
@@ -36,4 +33,4 @@ add_library_clr(runcommand SHARED ${RUNCOMMAND_SOURCES})
 target_link_libraries(runcommand ${RUNCOMMAND_LIBRARY})
 
 # add the install targets
-install_clr(runcommand)
+install_clr(TARGETS runcommand DESTINATIONS .)

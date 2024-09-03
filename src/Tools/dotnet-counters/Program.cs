@@ -1,119 +1,255 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
+using System.Collections.Generic;
 using System.CommandLine;
 using System.CommandLine.Binding;
 using System.CommandLine.Builder;
 using System.CommandLine.Invocation;
+using System.CommandLine.Parsing;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Collections.Generic;
-using Microsoft.Diagnostics.Tools.RuntimeClient;
+using Microsoft.Internal.Common;
 using Microsoft.Internal.Common.Commands;
+using Microsoft.Internal.Common.Utils;
 
 namespace Microsoft.Diagnostics.Tools.Counters
 {
     public enum CountersExportFormat { csv, json };
 
-    internal class Program
+    internal static class Program
     {
-        delegate Task<int> ExportDelegate(CancellationToken ct, List<string> counter_list, IConsole console, int processId, int refreshInterval, CountersExportFormat format, string output);
+        private delegate Task<ReturnCode> CollectDelegate(
+            CancellationToken ct,
+            List<string> counter_list,
+            string counters,
+            IConsole console,
+            int processId,
+            int refreshInterval,
+            CountersExportFormat format,
+            string output,
+            string processName,
+            string port,
+            bool resumeRuntime,
+            int maxHistograms,
+            int maxTimeSeries,
+            TimeSpan duration);
+
+        private delegate Task<ReturnCode> MonitorDelegate(
+            CancellationToken ct,
+            List<string> counter_list,
+            string counters,
+            IConsole console,
+            int processId,
+            int refreshInterval,
+            string processName,
+            string port,
+            bool resumeRuntime,
+            int maxHistograms,
+            int maxTimeSeries,
+            TimeSpan duration,
+            bool showDeltas);
 
         private static Command MonitorCommand() =>
-            new Command(
-                "monitor", 
-                "Start monitoring a .NET application", 
-                new Option[] { ProcessIdOption(), RefreshIntervalOption() },
-                argument: CounterList(),
-                handler: CommandHandler.Create<CancellationToken, List<string>, IConsole, int, int>(new CounterMonitor().Monitor));
+            new(
+                name: "monitor",
+                description: "Start monitoring a .NET application")
+            {
+                // Handler
+                HandlerDescriptor.FromDelegate((MonitorDelegate)new CounterMonitor().Monitor).GetCommandHandler(),
+                // Arguments and Options
+                CounterList(),
+                CounterOption(),
+                ProcessIdOption(),
+                RefreshIntervalOption(),
+                NameOption(),
+                DiagnosticPortOption(),
+                ResumeRuntimeOption(),
+                MaxHistogramOption(),
+                MaxTimeSeriesOption(),
+                DurationOption(),
+                ShowDeltasOption()
+            };
 
         private static Command CollectCommand() =>
-            new Command(
-                "collect",
-                "Monitor counters in a .NET application and export the result into a file",
-                new Option[] { ProcessIdOption(), RefreshIntervalOption(), ExportFormatOption(), ExportFileNameOption() },
-                argument: CounterList(),
-                handler: HandlerDescriptor.FromDelegate((ExportDelegate)new CounterMonitor().Collect).GetCommandHandler());
+            new(
+                name: "collect",
+                description: "Monitor counters in a .NET application and export the result into a file")
+            {
+                // Handler
+                HandlerDescriptor.FromDelegate((CollectDelegate)new CounterMonitor().Collect).GetCommandHandler(),
+                // Arguments and Options
+                CounterList(),
+                CounterOption(),
+                ProcessIdOption(),
+                RefreshIntervalOption(),
+                ExportFormatOption(),
+                ExportFileNameOption(),
+                NameOption(),
+                DiagnosticPortOption(),
+                ResumeRuntimeOption(),
+                MaxHistogramOption(),
+                MaxTimeSeriesOption(),
+                DurationOption()
+            };
+
+        private static Option NameOption() =>
+            new(
+                aliases: new[] { "-n", "--name" },
+                description: "The name of the process that will be monitored.")
+            {
+                Argument = new Argument<string>(name: "name")
+            };
 
         private static Option ProcessIdOption() =>
-            new Option(
-                new[] { "-p", "--process-id" }, 
-                "The ID of the process that will be monitored.",
-                new Argument<int> { Name = "pid" });
+            new(
+                aliases: new[] { "-p", "--process-id" },
+                description: "The process id that will be monitored.")
+            {
+                Argument = new Argument<int>(name: "pid")
+            };
 
         private static Option RefreshIntervalOption() =>
-            new Option(
-                new[] { "--refresh-interval" }, 
-                "The number of seconds to delay between updating the displayed counters.",
-                new Argument<int>(defaultValue: 1) { Name = "refresh-interval" });
+            new(
+                alias: "--refresh-interval",
+                description: "The number of seconds to delay between updating the displayed counters.")
+            {
+                Argument = new Argument<int>(name: "refresh-interval", getDefaultValue: () => 1)
+            };
 
-        private static Option ExportFormatOption() => 
-            new Option(
-                new[] { "--format" },
-                "The format of exported counter data.",
-                new Argument<CountersExportFormat>(defaultValue: CountersExportFormat.csv) { Name = "format" });
+        private static Option ExportFormatOption() =>
+            new(
+                alias: "--format",
+                description: "The format of exported counter data.")
+            {
+                Argument = new Argument<CountersExportFormat>(name: "format", getDefaultValue: () => CountersExportFormat.csv)
+            };
 
-        private static Option ExportFileNameOption() => 
-            new Option(
-                new[] { "-o", "--output" },
-                "The output file name.",
-                new Argument<string>(defaultValue: "counter") { Name = "output" });
+        private static Option ExportFileNameOption() =>
+            new(
+                aliases: new[] { "-o", "--output" },
+                description: "The output file name.")
+            {
+                Argument = new Argument<string>(name: "output", getDefaultValue: () => "counter")
+            };
+
+        private static Option CounterOption() =>
+            new(
+                alias: "--counters",
+                description: "A comma-separated list of counter providers. Counter providers can be specified as <provider_name> or <provider_name>[comma_separated_counter_names]. If the provider_name" +
+                " is used without qualifying counter_names then all counters will be shown. For example \"System.Runtime[dotnet.assembly.count,dotnet.gc.pause.time],Microsoft.AspNetCore.Hosting\"" +
+                " includes the dotnet.assembly.count and dotnet.gc.pause.time counters from the System.Runtime provider and all the counters from the Microsoft.AspNetCore.Hosting provider. Provider" +
+                " names can either refer to the name of a Meter for the System.Diagnostics.Metrics API or the name of an EventSource for the EventCounters API. If the monitored application has both" +
+                " a Meter and an EventSource with the same name, the Meter is automatically preferred. Use the prefix \'EventCounters\\\' in front of a provider name to only show the EventCounters." +
+                " To discover well-known provider and counter names, please visit https://learn.microsoft.com/dotnet/core/diagnostics/built-in-metrics.")
+            {
+                Argument = new Argument<string>(name: "counters")
+            };
 
         private static Argument CounterList() =>
-            new Argument<List<string>> {
-                Name = "counter_list",
-                Description = @"A space separated list of counters. Counters can be specified provider_name[:counter_name].
-                If the provider_name is used without a qualifying counter_name then all counters will be shown. To discover 
-                provider and counter names, use the list command.
-                .",
-                Arity = ArgumentArity.ZeroOrMore
+            new Argument<List<string>>(name: "counter_list", getDefaultValue: () => new List<string>())
+            {
+                Description = @"A space separated list of counter providers. Counters can be specified <provider_name> or <provider_name>[comma_separated_counter_names]. If the provider_name is used without a qualifying counter_names then all counters will be shown. To discover provider and counter names, use the list command.",
+                IsHidden = true
             };
 
         private static Command ListCommand() =>
-            new Command(
-                "list", 
-                "Display a list of counter names and descriptions, grouped by provider.", 
-                new Option[] { },
-                handler: CommandHandler.Create<IConsole>(List));
-
-        private static Command ProcessStatusCommand() =>
-            new Command(
-                "ps",
-                "Display a list of dotnet processes that can be monitored.",
-                new Option[] { },
-                handler: CommandHandler.Create<IConsole>(ProcessStatusCommandHandler.PrintProcessStatus));
-
-        public static int List(IConsole console)
-        {
-            var profiles = KnownData.GetAllProviders();
-            var maxNameLength = profiles.Max(p => p.Name.Length);
-            Console.WriteLine("Showing well-known counters only. Specific processes may support additional counters.\n");
-            foreach (var profile in profiles)
+            new(
+                name: "list",
+                description: "Display a list of counter names and descriptions, grouped by provider.")
             {
-                var counters = profile.GetAllCounters();
-                var maxCounterNameLength = counters.Max(c => c.Name.Length);
-                Console.WriteLine($"{profile.Name.PadRight(maxNameLength)}");
-                foreach (var counter in profile.Counters.Values)
-                {
-                    Console.WriteLine($"    {counter.Name.PadRight(maxCounterNameLength)} \t\t {counter.Description}");
-                }
-                Console.WriteLine("");
-            }
+                CommandHandler.Create<IConsole, string>(List),
+                RuntimeVersionOption()
+            };
+
+        private static Option RuntimeVersionOption() =>
+            new(
+                aliases: new[] { "-r", "--runtime-version" },
+                description: "Version of runtime. Supported runtime version: 3.0, 3.1, 5.0, 6.0, 7.0, 8.0")
+            {
+                Argument = new Argument<string>(name: "runtimeVersion", getDefaultValue: () => "6.0")
+            };
+
+        private static Option DiagnosticPortOption() =>
+            new(
+                aliases: new[] { "--dport", "--diagnostic-port" },
+                description: "The path to diagnostic port to be used.")
+            {
+                Argument = new Argument<string>(name: "diagnosticPort", getDefaultValue: () => "")
+            };
+
+        private static Option ResumeRuntimeOption() =>
+            new(
+                alias: "--resume-runtime",
+                description: @"Resume runtime once session has been initialized, defaults to true. Disable resume of runtime using --resume-runtime:false")
+            {
+                Argument = new Argument<bool>(name: "resumeRuntime", getDefaultValue: () => true)
+            };
+
+        private static Option MaxHistogramOption() =>
+            new(
+                alias: "--maxHistograms",
+                description: "The maximum number of histograms that can be tracked. Each unique combination of provider name, histogram name, and dimension values" +
+                " counts as one histogram. Tracking more histograms uses more memory in the target process so this bound guards against unintentional high memory use.")
+            {
+                Argument = new Argument<int>(name: "maxHistograms", getDefaultValue: () => 10)
+            };
+
+        private static Option MaxTimeSeriesOption() =>
+            new(
+                alias: "--maxTimeSeries",
+                description: "The maximum number of time series that can be tracked. Each unique combination of provider name, metric name, and dimension values" +
+                " counts as one time series. Tracking more time series uses more memory in the target process so this bound guards against unintentional high memory use.")
+            {
+                Argument = new Argument<int>(name: "maxTimeSeries", getDefaultValue: () => 1000)
+            };
+
+        private static Option DurationOption() =>
+            new(
+                alias: "--duration",
+                description: @"When specified, will run for the given timespan and then automatically stop. Provided in the form of dd:hh:mm:ss.")
+            {
+                Argument = new Argument<TimeSpan>(name: "duration-timespan", getDefaultValue: () => default)
+            };
+
+        private static Option ShowDeltasOption() =>
+            new(
+                alias: "--showDeltas",
+                description: @"Shows an extra column in the metrics table that displays the delta between the previous metric value and the most recent value." +
+               " This is useful to monitor the rate of change for a metric.")
+            { };
+
+        public static int List(IConsole console, string runtimeVersion)
+        {
+            Console.WriteLine("Counter information has been moved to the online .NET documentation.");
+            Console.WriteLine("Please visit https://learn.microsoft.com/dotnet/core/diagnostics/built-in-metrics.");
             return 1;
         }
 
         private static Task<int> Main(string[] args)
         {
-            var parser = new CommandLineBuilder()
+            Parser parser = new CommandLineBuilder()
                 .AddCommand(MonitorCommand())
                 .AddCommand(CollectCommand())
                 .AddCommand(ListCommand())
-                .AddCommand(ProcessStatusCommand())
-                .UseDefaults()
+                .AddCommand(ProcessStatusCommandHandler.ProcessStatusCommand("Lists the dotnet processes that can be monitored."))
+                .UseToolsDefaults()
                 .Build();
+
+            ParseResult parseResult = parser.Parse(args);
+            string parsedCommandName = parseResult.CommandResult.Command.Name;
+            if (parsedCommandName is "monitor" or "collect")
+            {
+                IReadOnlyCollection<string> unparsedTokens = parseResult.UnparsedTokens;
+                // If we notice there are unparsed tokens, user might want to attach on startup.
+                if (unparsedTokens.Count > 0)
+                {
+                    ProcessLauncher.Launcher.PrepareChildProcess(args);
+                }
+            }
+
             return parser.InvokeAsync(args);
         }
     }

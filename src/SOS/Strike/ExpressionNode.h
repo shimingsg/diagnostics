@@ -1,6 +1,5 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 
 #ifndef _EXPRESSION_NODE_
@@ -88,6 +87,8 @@ public:
     VOID DFSVisit(ExpressionNodeVisitorCallback pFunc, VOID* pUserData, int depth=0);
 
 private:
+    static ICorDebugProcess* s_pCorDebugProcess;
+
     // for nodes that evaluate to a type, this is that type
     // for nodes that evaluate to a debuggee value, this is the type of that
     // value or one of its base types. It represents the type the value should

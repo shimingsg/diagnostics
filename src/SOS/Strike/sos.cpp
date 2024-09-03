@@ -1,23 +1,10 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 #include "strike.h"
 #include "util.h"
-
 #include "sos.h"
-
-
-#ifdef _ASSERTE
-#undef _ASSERTE
-#endif
-
-#define _ASSERTE(a) {;}
-
 #include "gcdesc.h"
-
-
-#undef _ASSERTE
 
 namespace sos
 {
@@ -25,11 +12,13 @@ namespace sos
     static bool MemOverlap(T beg1, T end1, // first range
                            T beg2, T end2) // second range
     {
+        if (beg1 >= end1 || beg2 >= end2)       // one of the ranges is empty
+            return false;
         if (beg2 >= beg1 && beg2 <= end1)       // second range starts within first range
             return true;
         else if (end2 >= beg1 && end2 <= end1)  // second range ends within first range
             return true;
-        else if (beg1 >= beg2 && beg1 <= end2)  // first range starts within second range 
+        else if (beg1 >= beg2 && beg1 <= end2)  // first range starts within second range
             return true;
         else if (end1 >= beg2 && end1 <= end2)  // first range ends within second range
             return true;
@@ -51,8 +40,8 @@ namespace sos
         if ((mAddress & ~ALIGNCONST) != mAddress)
             sos::Throw<Exception>("Object %p is misaligned.", mAddress);
     }
-    
-    
+
+
     Object::Object(const Object &rhs)
         : mAddress(rhs.mAddress), mMT(rhs.mMT), mSize(rhs.mSize), mPointers(rhs.mPointers), mMTData(rhs.mMTData), mTypeName(rhs.mTypeName)
     {
@@ -64,7 +53,7 @@ namespace sos
     {
         if (mMTData)
             delete mMTData;
-        
+
         if (mTypeName)
             delete mTypeName;
 
@@ -110,33 +99,33 @@ namespace sos
 
     TADDR Object::GetMT() const
     {
-        if (mMT == NULL)
+        if (mMT == (TADDR)0)
         {
             TADDR temp;
             if (FAILED(MOVE(temp, mAddress)))
                 sos::Throw<DataRead>("Object %s has an invalid method table.", DMLListNearObj(mAddress));
-            
-            if (temp == NULL)
+
+            if (temp == (TADDR)0)
                 sos::Throw<HeapCorruption>("Object %s has an invalid method table.", DMLListNearObj(mAddress));
 
-            mMT = temp & ~3;
+            mMT = temp & ~METHODTABLE_PTR_LOW_BITMASK;
         }
 
         return mMT;
     }
-    
+
     TADDR Object::GetComponentMT() const
     {
-        if (mMT != NULL && mMT != sos::MethodTable::GetArrayMT())
-            return NULL;
-        
+        if (mMT != (TADDR)0 && mMT != sos::MethodTable::GetArrayMT())
+            return (TADDR)0;
+
         DacpObjectData objData;
         if (FAILED(objData.Request(g_sos, TO_CDADDR(mAddress))))
             sos::Throw<DataRead>("Failed to request object data for %s.", DMLListNearObj(mAddress));
-        
-        if (mMT == NULL)
-            mMT = TO_TADDR(objData.MethodTable) & ~3;
-        
+
+        if (mMT == (TADDR)0)
+            mMT = TO_TADDR(objData.MethodTable) & ~METHODTABLE_PTR_LOW_BITMASK;
+
         return TO_TADDR(objData.ElementTypeHandle);
     }
 
@@ -144,8 +133,8 @@ namespace sos
     {
         if (mTypeName == NULL)
             mTypeName = CreateMethodTableName(GetMT(), GetComponentMT());
-            
-        
+
+
         if (mTypeName == NULL)
             return W("<error>");
 
@@ -190,7 +179,7 @@ namespace sos
                 info->LoaderAllocatorObjectHandle = TO_TADDR(mtcd.LoaderAllocatorObjectHandle);
             }
         }
-        
+
         if (mSize == (size_t)~0)
         {
             mSize = info->BaseSize;
@@ -259,11 +248,11 @@ namespace sos
         // Verify all fields on the object.
         CLRDATA_ADDRESS dwAddr = vMethodTableFields.FirstField;
         DacpFieldDescData vFieldDesc;
-        
+
         while (numInstanceFields < vMethodTableFields.wNumInstanceFields)
         {
             CheckInterrupt();
-            
+
             if (FAILED(vFieldDesc.Request(g_sos, dwAddr)))
                 return false;
 
@@ -271,27 +260,27 @@ namespace sos
                 return false;
 
             dwAddr = vFieldDesc.NextField;
-                
+
             if (!vFieldDesc.bIsStatic)
             {
-                numInstanceFields++;            
+                numInstanceFields++;
                 TADDR dwTmp = TO_TADDR(obj + vFieldDesc.dwOffset + sizeof(BaseObject));
                 if (vFieldDesc.Type == ELEMENT_TYPE_CLASS)
                 {
-                    // Is it a valid object?  
+                    // Is it a valid object?
                     if (FAILED(MOVE(dwTmp, dwTmp)))
                         return false;
 
-                    if (dwTmp != NULL)
+                    if (dwTmp != (TADDR)0)
                     {
                         DacpObjectData objData;
                         if (FAILED(objData.Request(g_sos, TO_CDADDR(dwTmp))))
                             return false;
                     }
                 }
-            }        
+            }
         }
-        
+
         return true;
     }
 
@@ -301,7 +290,7 @@ namespace sos
         MethodTable mt = addr;
         return _wcscmp(mt.GetName(), W("<Unloaded Type>")) == 0;
     }
-    
+
     void MethodTable::Clear()
     {
         if (mName)
@@ -310,15 +299,15 @@ namespace sos
             mName = NULL;
         }
     }
-    
+
     const WCHAR *MethodTable::GetName() const
     {
         if (mName == NULL)
             mName = CreateMethodTableName(mMT);
-        
+
         if (mName == NULL)
             return W("<error>");
-            
+
         return mName;
     }
 
@@ -334,7 +323,7 @@ namespace sos
         {
             return VerifyMemberFields(TO_TADDR(objectData.MethodTable), address);
         }
-        
+
         return true;
     }
 
@@ -349,19 +338,19 @@ namespace sos
         out.ThreadId = header & SBLK_MASK_LOCK_THREADID;
         out.Recursion = (header & SBLK_MASK_LOCK_RECLEVEL) >> SBLK_RECLEVEL_SHIFT;
 
-        CLRDATA_ADDRESS threadPtr = NULL;
+        CLRDATA_ADDRESS threadPtr = (TADDR)0;
         if (g_sos->GetThreadFromThinlockID(out.ThreadId, &threadPtr) != S_OK)
         {
-            out.ThreadPtr = NULL;
+            out.ThreadPtr = (TADDR)0;
         }
         else
         {
             out.ThreadPtr = TO_TADDR(threadPtr);
         }
-        
-        return out.ThreadId != 0 && out.ThreadPtr != NULL;
+
+        return out.ThreadId != 0 && out.ThreadPtr != (TADDR)0;
     }
-    
+
     bool Object::GetStringData(__out_ecount(size) WCHAR *buffer, size_t size) const
     {
         SOS_Assert(IsString());
@@ -370,7 +359,7 @@ namespace sos
 
         return SUCCEEDED(g_sos->GetObjectStringData(mAddress, (ULONG32)size, buffer, NULL));
     }
-    
+
     size_t Object::GetStringLength() const
     {
         SOS_Assert(IsString());
@@ -380,434 +369,11 @@ namespace sos
             sos::Throw<DataRead>("Failed to read object data at %p.", mAddress);
 
         // We get the method table for free here, if we don't have it already.
-        SOS_Assert((mMT == NULL) || (mMT == TO_TADDR(stInfo.methodTable)));
-        if (mMT == NULL)
+        SOS_Assert((mMT == (TADDR)0) || (mMT == TO_TADDR(stInfo.methodTable)));
+        if (mMT == (TADDR)0)
             mMT = TO_TADDR(stInfo.methodTable);
 
         return (size_t)stInfo.m_StringLength;
-    }
-
-
-    RefIterator::RefIterator(TADDR obj, LinearReadCache *cache)
-        : mCache(cache), mGCDesc(0), mArrayOfVC(false), mDone(false), mBuffer(0), mCurrSeries(0), mLoaderAllocatorObjectHandle(0),
-          i(0), mCount(0), mCurr(0), mStop(0), mObject(obj), mObjSize(0)
-    {
-        Init();
-    }
-
-    RefIterator::RefIterator(TADDR obj, CGCDesc *desc, bool arrayOfVC, LinearReadCache *cache)
-        : mCache(cache), mGCDesc(desc), mArrayOfVC(arrayOfVC), mDone(false), mBuffer(0), mCurrSeries(0), mLoaderAllocatorObjectHandle(0),
-          i(0), mCount(0), mCurr(0), mStop(0), mObject(obj), mObjSize(0)
-    {
-        Init();
-    }
-    
-    RefIterator::~RefIterator()
-    {
-        if (mBuffer)
-            delete [] mBuffer;
-    }
-    
-    const RefIterator &RefIterator::operator++()
-    {
-        if (mDone)
-            Throw<Exception>("Attempt to move past the end of the iterator.");
-
-        if (mCurr == mLoaderAllocatorObjectHandle)
-        {
-            // The mLoaderAllocatorObjectHandle is always the last reference returned
-            mDone = true;
-            return *this;
-        }
-        
-        if (!mArrayOfVC)
-        {
-            mCurr += sizeof(TADDR);
-            if (mCurr >= mStop)
-            {
-                mCurrSeries--;
-                if (mCurrSeries < mGCDesc->GetLowestSeries())
-                {
-                    mDone = true;
-                }
-                else
-                {
-                    mCurr = mObject + mCurrSeries->GetSeriesOffset();
-                    mStop = mCurr + mCurrSeries->GetSeriesSize() + mObjSize;
-                }
-            }
-        }
-        else
-        {
-            mCurr += sizeof(TADDR);
-            if (mCurr >= mStop)
-            {
-                int i_last = i;
-                i--;
-                
-                if (i == mCount)
-                    i = 0;
-                
-                mCurr += mCurrSeries->val_serie[i_last].skip;
-                mStop = mCurr + mCurrSeries->val_serie[i].nptrs * sizeof(TADDR);
-            }
-            
-            if (mCurr >= mObject + mObjSize - plug_skew)
-                mDone = true;
-        }
-        
-        if (mDone && mLoaderAllocatorObjectHandle != NULL)
-        {
-            // The iteration over all regular object references is done, but there is one more
-            // reference for collectible types - the LoaderAllocator for GC
-            mCurr = mLoaderAllocatorObjectHandle;
-            mDone = false;
-        }
-
-        return *this;
-    }
-    
-    TADDR RefIterator::operator*() const
-    {
-        return ReadPointer(mCurr);
-    }
-    
-    TADDR RefIterator::GetOffset() const
-    {
-        return mCurr - mObject;
-    }
-    
-    void RefIterator::Init()
-    {
-        TADDR mt = ReadPointer(mObject);
-        BOOL bContainsPointers = FALSE;
-        BOOL bCollectible = FALSE;
-        TADDR loaderAllocatorObjectHandle;
-
-        if (!GetSizeEfficient(mObject, mt, FALSE, mObjSize, bContainsPointers))
-            Throw<DataRead>("Failed to get size of object.");
-
-        if (!GetCollectibleDataEfficient(mt, bCollectible, loaderAllocatorObjectHandle))
-            Throw<DataRead>("Failed to get collectible info of object.");
-
-        if (!bContainsPointers && !bCollectible)
-        {
-            mDone = true;
-            return;
-        }
-
-        if (bContainsPointers)
-        {
-            if (!mGCDesc)
-            {
-                int entries = 0;
-
-                if (FAILED(MOVE(entries, mt-sizeof(TADDR))))
-                    Throw<DataRead>("Failed to request number of entries.");
-
-                // array of vc?
-                if (entries < 0)
-                {
-                    entries = -entries;
-                    mArrayOfVC = true;
-                }
-                else
-                {
-                    mArrayOfVC = false;
-                }
-
-                size_t slots = 1 + entries * sizeof(CGCDescSeries)/sizeof(TADDR);
-
-                ArrayHolder<TADDR> buffer = new TADDR[slots];
-
-                ULONG fetched = 0;
-                CLRDATA_ADDRESS address = TO_CDADDR(mt - slots*sizeof(TADDR));
-                if (FAILED(g_ExtData->ReadVirtual(address, buffer, (ULONG)(slots*sizeof(TADDR)), &fetched)))
-                    Throw<DataRead>("Failed to request GCDesc.");
-
-                mBuffer = buffer.Detach();
-                mGCDesc = (CGCDesc*)(mBuffer + slots);
-            }
-
-            mCurrSeries = mGCDesc->GetHighestSeries();
-
-            if (!mArrayOfVC)
-            {
-                mCurr = mObject + mCurrSeries->GetSeriesOffset();
-                mStop = mCurr + mCurrSeries->GetSeriesSize() + mObjSize;
-            }
-            else
-            {
-                i = 0;
-                mCurr = mObject + mCurrSeries->startoffset;
-                mStop = mCurr + mCurrSeries->val_serie[i].nptrs * sizeof(TADDR);
-                mCount = (int)mGCDesc->GetNumSeries();
-            }
-
-            if (mCurr == mStop)
-                operator++();
-            else if (mCurr >= mObject + mObjSize - plug_skew)
-                mDone = true;
-        }
-        else
-        {
-            mDone = true;
-        }
-
-        if (bCollectible)
-        {
-            mLoaderAllocatorObjectHandle = loaderAllocatorObjectHandle;
-            if (mDone)
-            {
-                // There are no object references, but there is still a reference for 
-                // collectible types - the LoaderAllocator for GC
-                mCurr = mLoaderAllocatorObjectHandle;
-                mDone = false;
-            }
-        }
-    }
-
-
-    const TADDR GCHeap::HeapStart = 0;
-    const TADDR GCHeap::HeapEnd = ~0;
-
-    ObjectIterator::ObjectIterator(const DacpGcHeapDetails *heap, int numHeaps, TADDR start, TADDR stop)
-    : bLarge(false), mCurrObj(0), mLastObj(0), mStart(start), mEnd(stop), mSegmentEnd(0), mHeaps(heap),
-      mNumHeaps(numHeaps), mCurrHeap(0)
-    {
-        mAllocInfo.Init();
-        SOS_Assert(numHeaps > 0);
-
-        TADDR segStart = TO_TADDR(mHeaps[0].generation_table[GetMaxGeneration()].start_segment);
-        if (FAILED(mSegment.Request(g_sos, segStart, mHeaps[0])))
-            sos::Throw<DataRead>("Could not request segment data at %p.", segStart);
-
-        mCurrObj = mStart < TO_TADDR(mSegment.mem) ? TO_TADDR(mSegment.mem) : mStart;
-        mSegmentEnd = (segStart == TO_TADDR(mHeaps[0].ephemeral_heap_segment)) ? 
-                            TO_TADDR(mHeaps[0].alloc_allocated) :
-                            TO_TADDR(mSegment.allocated);
-
-        CheckSegmentRange();
-    }
-
-    bool ObjectIterator::NextSegment()
-    {
-        if (mCurrHeap >= mNumHeaps)
-            return false;
-
-        TADDR next = TO_TADDR(mSegment.next);
-        if (next == NULL)
-        {
-            if (bLarge)
-            {
-                mCurrHeap++;
-                if (mCurrHeap == mNumHeaps)
-                    return false;
-
-                bLarge = false;
-                next = TO_TADDR(mHeaps[mCurrHeap].generation_table[GetMaxGeneration()].start_segment);
-            }
-            else
-            {
-                bLarge = true;
-                next = TO_TADDR(mHeaps[mCurrHeap].generation_table[GetMaxGeneration()+1].start_segment);
-            }
-        }
-
-        SOS_Assert(next != NULL);
-        if (FAILED(mSegment.Request(g_sos, next, mHeaps[mCurrHeap])))
-            sos::Throw<DataRead>("Failed to request segment data at %p.", next);
-
-        mLastObj = 0;
-        mCurrObj = mStart < TO_TADDR(mSegment.mem) ? TO_TADDR(mSegment.mem) : mStart;
-        mSegmentEnd = (next == TO_TADDR(mHeaps[mCurrHeap].ephemeral_heap_segment)) ? 
-                            TO_TADDR(mHeaps[mCurrHeap].alloc_allocated) : 
-                            TO_TADDR(mSegment.allocated);
-        return CheckSegmentRange();
-    }
-
-    bool ObjectIterator::CheckSegmentRange()
-    {
-        CheckInterrupt();
-
-        while (!MemOverlap(mStart, mEnd, TO_TADDR(mSegment.mem), mSegmentEnd))
-            if (!NextSegment())
-                return false;
-
-        // At this point we know that the current segment contains objects in
-        // the correct range.  However, there's no telling if the user gave us
-        // a starting address that corresponds to an object.  If mStart is a
-        // valid object, then we'll just start there.  If it's not we'll need
-        // to walk the segment from the beginning to find the first aligned
-        // object on or after mStart.
-        if (mCurrObj == mStart && !Object::IsValid(mStart))
-        {
-            // It's possible mCurrObj will equal mStart after this.  That's fine.
-            // It means that the starting object is corrupt (and we'll figure
-            // that when the user calls GetNext), or IsValid was wrong.
-            mLastObj = 0;
-            mCurrObj = TO_TADDR(mSegment.mem);
-            while (mCurrObj < mStart)
-                MoveToNextObject();
-        }
-
-        return true;
-    }
-
-
-    
-    const Object &ObjectIterator::operator*() const
-    {
-        AssertSanity();
-        return mCurrObj;
-    }
-
-
-    const Object *ObjectIterator::operator->() const
-    {
-        AssertSanity();
-        return &mCurrObj;
-    }
-
-    //Object ObjectIterator::GetNext()
-    const ObjectIterator &ObjectIterator::operator++()
-    {
-        CheckInterrupt();
-
-        // Assert we aren't done walking the heap.
-        SOS_Assert(*this);
-        AssertSanity();
-
-        MoveToNextObject();
-        return *this;
-    }
-
-    void ObjectIterator::MoveToNextObjectCarefully()
-    {
-        CheckInterrupt();
-
-        SOS_Assert(*this);
-        AssertSanity();
-
-        // Move to NextObject won't generally throw unless it fails to request the
-        // MethodTable of the object.  At which point we won't know how large the
-        // current object is, nor how to move past it.  In this case we'll simply
-        // move to the next segment if possible to continue iterating from there.
-        try
-        {
-            MoveToNextObject();
-        }
-        catch(const sos::Exception &)
-        {
-            NextSegment();
-        }
-    }
-
-    void ObjectIterator::AssertSanity() const
-    {
-        // Assert that we are in a sane state. Function which call this assume two things:
-        //   1. That the current object is within the segment bounds.
-        //   2. That the current object is within the requested memory range.
-        SOS_Assert(mCurrObj >= TO_TADDR(mSegment.mem));
-        SOS_Assert(mCurrObj <= TO_TADDR(mSegmentEnd - Align(min_obj_size)));
-
-        SOS_Assert(mCurrObj >= mStart);
-        SOS_Assert(mCurrObj <= mEnd);
-    }
-
-    void ObjectIterator::MoveToNextObject()
-    {
-        // Object::GetSize can be unaligned, so we must align it ourselves.
-        size_t size = (bLarge ? AlignLarge(mCurrObj.GetSize()) : Align(mCurrObj.GetSize()));
-
-        mLastObj = mCurrObj;
-        mCurrObj = mCurrObj.GetAddress() + size;
-
-        if (!bLarge)
-        {       
-            // Is this the end of an allocation context? We need to know this because there can be
-            // allocated memory at the end of an allocation context that doesn't yet contain any objects.
-            // This happens because we actually allocate a minimum amount of memory (the allocation quantum)
-            // whenever we need to get more memory. Typically, a single allocation request won't fill this
-            // block, so we'll fulfill subsequent requests out of the remainder of the block until it's
-            // depleted. 
-            int i;
-            for (i = 0; i < mAllocInfo.num; i ++)
-            {
-                if (mCurrObj == TO_TADDR(mAllocInfo.array[i].alloc_ptr)) // end of objects in this context
-                {
-                    // Set mCurrObj to point after the context (alloc_limit is the end of the allocation context).
-                    mCurrObj = TO_TADDR(mAllocInfo.array[i].alloc_limit) + Align(min_obj_size);
-                    break;
-                }
-            }
-
-            // We also need to look at the gen0 alloc context.
-            if (mCurrObj == TO_TADDR(mHeaps[mCurrHeap].generation_table[0].allocContextPtr))
-                mCurrObj = TO_TADDR(mHeaps[mCurrHeap].generation_table[0].allocContextLimit) + Align(min_obj_size);
-        }
-
-        if (mCurrObj > mEnd || mCurrObj >= mSegmentEnd)
-            NextSegment();
-    }
-
-    SyncBlkIterator::SyncBlkIterator()
-    : mCurr(1), mTotal(0)
-    {
-        // If DacpSyncBlockData::Request fails with the call "1", then it means
-        // there are no SyncBlocks in the process.
-        DacpSyncBlockData syncBlockData;
-        if (SUCCEEDED(syncBlockData.Request(g_sos, 1)))
-            mTotal = syncBlockData.SyncBlockCount;
-
-        mSyncBlk = mCurr;
-    }
-
-    GCHeap::GCHeap()
-    {
-        if (FAILED(mHeapData.Request(g_sos)))
-            sos::Throw<DataRead>("Failed to request GC heap data.");
-
-        if (mHeapData.bServerMode)
-        {
-            mNumHeaps = mHeapData.HeapCount;
-            DWORD dwAllocSize = 0;
-            if (!ClrSafeInt<DWORD>::multiply(sizeof(CLRDATA_ADDRESS), mNumHeaps, dwAllocSize))
-                sos::Throw<Exception>("Failed to get GCHeaps: Integer overflow.");
-
-            CLRDATA_ADDRESS *heapAddrs = (CLRDATA_ADDRESS*)alloca(dwAllocSize);
-            if (FAILED(g_sos->GetGCHeapList(mNumHeaps, heapAddrs, NULL)))
-                sos::Throw<DataRead>("Failed to get GCHeaps.");
-
-            mHeaps = new DacpGcHeapDetails[mNumHeaps];
-
-            for (int i = 0; i < mNumHeaps; i++)
-                if (FAILED(mHeaps[i].Request(g_sos, heapAddrs[i])))
-                    sos::Throw<DataRead>("Failed to get GC heap details at %p.", heapAddrs[i]);
-        }
-        else
-        {
-            mHeaps = new DacpGcHeapDetails[1];
-            mNumHeaps = 1;
-            
-            if (FAILED(mHeaps[0].Request(g_sos)))
-                sos::Throw<DataRead>("Failed to request GC details data.");
-        }
-    }
-
-    GCHeap::~GCHeap()
-    {
-        delete [] mHeaps;
-    }
-
-    ObjectIterator GCHeap::WalkHeap(TADDR start, TADDR stop) const
-    {
-        return ObjectIterator(mHeaps, mNumHeaps, start, stop);
-    }
-
-    bool GCHeap::AreGCStructuresValid() const
-    {
-        return mHeapData.bGcStructuresValid != FALSE;
     }
 
     // SyncBlk class
@@ -821,7 +387,7 @@ namespace sos
     {
         Init();
     }
-    
+
     const SyncBlk &SyncBlk::operator=(int index)
     {
         mIndex = index;
@@ -898,7 +464,7 @@ namespace sos
         SOS_Assert(mIndex);
         return TO_TADDR(mData.appDomainPtr);
     }
-    
+
     void BuildTypeWithExtraInfo(TADDR addr, unsigned int size, __inout_ecount(size) WCHAR *buffer)
     {
         try
@@ -907,9 +473,9 @@ namespace sos
             TADDR mtAddr = obj.GetMT();
             bool isArray = sos::MethodTable::IsArrayMT(mtAddr);
             bool isString = obj.IsString();
-            
+
             sos::MethodTable mt(isArray ? obj.GetComponentMT() : mtAddr);
-            
+
             if (isArray)
             {
                 swprintf_s(buffer, size, W("%s[]"), mt.GetName());
@@ -917,8 +483,8 @@ namespace sos
             else if (isString)
             {
                 WCHAR str[32];
-                obj.GetStringData(str, _countof(str));
-                
+                obj.GetStringData(str, ARRAY_SIZE(str));
+
                 _snwprintf_s(buffer, size, _TRUNCATE, W("%s: \"%s\""), mt.GetName(), str);
             }
             else
@@ -929,10 +495,10 @@ namespace sos
         catch (const sos::Exception &e)
         {
             int len = MultiByteToWideChar(CP_ACP, 0, e.what(), -1, NULL, 0);
-            
+
             ArrayHolder<WCHAR> tmp = new WCHAR[len];
             MultiByteToWideChar(CP_ACP, 0, e.what(), -1, (WCHAR*)tmp, len);
-            
+
             swprintf_s(buffer, size, W("<invalid object: '%s'>"), (WCHAR*)tmp);
         }
     }

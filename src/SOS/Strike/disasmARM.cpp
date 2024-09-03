@@ -1,22 +1,23 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
-// ==++==
-// 
- 
-// 
-// ==--==
-
+#undef _TARGET_X86_
 #ifndef _TARGET_ARM_
 #define _TARGET_ARM_
 #endif
 
+#undef TARGET_X86
+#ifndef TARGET_ARM
+#define TARGET_ARM
+#endif
+
+#ifndef FEATURE_EH_FUNCLETS
+#define FEATURE_EH_FUNCLETS
+#endif
 
 #include "strike.h"
 #include "util.h"
 #include <dbghelp.h>
-
 
 #include "disasm.h"
 
@@ -26,11 +27,7 @@
 
 namespace ARMGCDump
 {
-#undef _TARGET_X86_
-#define WIN64EXCEPTIONS
-#undef LIMITED_METHOD_CONTRACT
-#define LIMITED_METHOD_DAC_CONTRACT
-#define SUPPORTS_DAC
+#undef TARGET_X86
 #define LF_GCROOTS
 #define LL_INFO1000
 #define LOG(x)
@@ -255,9 +252,9 @@ static TADDR MDForCall (TADDR callee)
 {
     // call managed code?
     JITTypes jitType;
-    TADDR methodDesc;
     TADDR PC = callee;
-    TADDR gcinfoAddr;
+    DWORD_PTR methodDesc;
+    DWORD_PTR gcinfoAddr;
 
     PC = GetRealCallTarget(callee);
     if (!PC)
@@ -418,7 +415,7 @@ void ARMMachine::Unassembly (
         }
 
         ULONG_PTR prevPC = PC;
-        DisasmAndClean (PC, line, _countof(line));
+        DisasmAndClean (PC, line, ARRAY_SIZE(line));
 
         // look at the disassembled bytes
         ptr = line;
@@ -450,7 +447,7 @@ void ARMMachine::Unassembly (
             ULONG_PTR OrigInstrAddr = GCStressCodeCopy + (InstrAddr - PCBegin);
             ULONG_PTR OrigPC = OrigInstrAddr;
 
-            DisasmAndClean(OrigPC, line, _countof(line));
+            DisasmAndClean(OrigPC, line, ARRAY_SIZE(line));
 
             //
             // Increment the real PC based on the size of the unmodifed
@@ -595,7 +592,7 @@ BOOL ARMMachine::GetExceptionContext (TADDR stack, TADDR PC, TADDR *cxrAddr, CRO
         return FALSE;
     *cxrAddr = stack;
 
-    if (FAILED (g_ExtData->ReadVirtual(TO_CDADDR(stack), cxr, sizeof(DT_CONTEXT), NULL))) {
+    if (FAILED (g_ExtData->ReadVirtual(TO_CDADDR(stack), cxr, GetContextSize(), NULL))) {
         return FALSE;
     }
 

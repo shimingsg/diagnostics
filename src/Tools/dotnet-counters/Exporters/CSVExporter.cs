@@ -1,18 +1,20 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
+using System.Globalization;
 using System.IO;
 using System.Text;
+using Microsoft.Diagnostics.Monitoring.EventPipe;
 
 namespace Microsoft.Diagnostics.Tools.Counters.Exporters
 {
-    class CSVExporter : ICounterRenderer
+    internal class CSVExporter : ICounterRenderer
     {
-        private string _output;
+        private readonly object _lock = new(); // protects the StringBuilder instance.
+        private readonly string _output;
         private StringBuilder builder;
-        private int flushLength = 10_000; // Arbitrary length to flush
+        private readonly int flushLength = 10_000; // Arbitrary length to flush
 
         public string Output { get; set; }
 
@@ -35,8 +37,11 @@ namespace Microsoft.Diagnostics.Tools.Counters.Exporters
                 Console.WriteLine($"[Warning] {_output} already exists. This file will be overwritten.");
                 File.Delete(_output);
             }
-            builder = new StringBuilder();
-            builder.AppendLine("Timestamp,Provider,Counter Name,Counter Type,Mean/Increment");
+            lock (_lock)
+            {
+                builder = new StringBuilder();
+                builder.AppendLine("Timestamp,Provider,Counter Name,Counter Type,Mean/Increment");
+            }
         }
 
         public void EventPipeSourceConnected()
@@ -44,29 +49,53 @@ namespace Microsoft.Diagnostics.Tools.Counters.Exporters
             Console.WriteLine("Starting a counter session. Press Q to quit.");
         }
 
+        public void SetErrorText(string errorText)
+        {
+            Console.WriteLine(errorText);
+        }
+
         public void ToggleStatus(bool paused)
         {
             // Do nothing
         }
 
-        public void CounterPayloadReceived(string providerName, ICounterPayload payload, bool _)
+        public void CounterPayloadReceived(CounterPayload payload, bool _)
         {
-            if (builder.Length > flushLength)
+            lock (_lock)
             {
-                File.AppendAllText(_output, builder.ToString());
-                builder.Clear();
+                if (builder.Length > flushLength)
+                {
+                    File.AppendAllText(_output, builder.ToString());
+                    builder.Clear();
+                }
+
+                builder
+                    .Append(payload.Timestamp.ToString()).Append(',')
+                    .Append(payload.CounterMetadata.ProviderName).Append(',')
+                    .Append(payload.GetDisplay());
+
+                string tags = payload.CombineTags();
+                if (!string.IsNullOrEmpty(tags))
+                {
+                    builder.Append('[').Append(tags.Replace(',', ';')).Append(']');
+                }
+                builder.Append(',')
+                    .Append(payload.CounterType).Append(',')
+                    .Append(payload.Value.ToString(CultureInfo.InvariantCulture)).Append('\n');
             }
-            builder.Append(DateTime.UtcNow.ToString() + ",");
-            builder.Append(providerName + ",");
-            builder.Append(payload.GetDisplay() + ",");
-            builder.Append(payload.GetCounterType() + ",");
-            builder.Append(payload.GetValue() + "\n");
         }
+
+        public void CounterStopped(CounterPayload payload) { }
 
         public void Stop()
         {
+            string outputString;
             // Append all the remaining text to the file.
-            File.AppendAllText(_output, builder.ToString());
+            lock (_lock)
+            {
+                outputString = builder.ToString();
+            }
+            File.AppendAllText(_output, outputString);
             Console.WriteLine("File saved to " + _output);
         }
     }

@@ -1,14 +1,74 @@
 <Dependencies>
   <ProductDependencies>
-    <Dependency Name="System.CommandLine.Experimental" Version=">0.2.0-alpha.19213.1">
-        <Uri>https://github.com/dotnet/command-line-api</Uri>
-        <Sha>166610c56ff732093f0145a2911d4f6c40b786da</Sha>
+    <Dependency Name="Microsoft.Diagnostics.Runtime" Version="4.0.0-beta.24413.1">
+      <Uri>https://github.com/microsoft/clrmd</Uri>
+      <Sha>40a5ed197ad23181a5ba1480422188733d2f86b5</Sha>
+    </Dependency>
+    <Dependency Name="Microsoft.Diagnostics.Runtime.Utilities" Version="4.0.0-beta.24413.1">
+      <Uri>https://github.com/microsoft/clrmd</Uri>
+      <Sha>40a5ed197ad23181a5ba1480422188733d2f86b5</Sha>
     </Dependency>
   </ProductDependencies>
   <ToolsetDependencies>
-    <Dependency Name="Microsoft.DotNet.Arcade.Sdk" Version="1.0.0-beta.19358.1">
+    <Dependency Name="Microsoft.DotNet.Arcade.Sdk" Version="10.0.0-beta.24430.1">
       <Uri>https://github.com/dotnet/arcade</Uri>
-      <Sha>4953cdf6c956adf69a0050c4df503048aed6b271</Sha>
+      <Sha>0ed1d3dc15420cd41c252b0c5d9474f197a29e06</Sha>
+    </Dependency>
+    <!-- Intermediate is necessary for source build. -->
+    <Dependency Name="Microsoft.SourceBuild.Intermediate.arcade" Version="10.0.0-beta.24430.1">
+      <Uri>https://github.com/dotnet/arcade</Uri>
+      <Sha>0ed1d3dc15420cd41c252b0c5d9474f197a29e06</Sha>
+      <SourceBuild RepoName="arcade" ManagedOnly="true" />
+    </Dependency>
+    <Dependency Name="Microsoft.DotNet.CodeAnalysis" Version="10.0.0-beta.24430.1">
+      <Uri>https://github.com/dotnet/arcade</Uri>
+      <Sha>0ed1d3dc15420cd41c252b0c5d9474f197a29e06</Sha>
+    </Dependency>
+    <Dependency Name="Microsoft.DotNet.RemoteExecutor" Version="7.0.0-beta.22316.2" Pinned="true">
+      <Uri>https://github.com/dotnet/arcade</Uri>
+      <Sha>ccfe6da198c5f05534863bbb1bff66e830e0c6ab</Sha>
+    </Dependency>
+    <Dependency Name="Microsoft.NET.Sdk" Version="9.0.100-rc.2.24452.3">
+      <Uri>https://github.com/dotnet/sdk</Uri>
+      <Sha>c294e97a49ccda45531a555e74ad8f89ec16dc8a</Sha>
+    </Dependency>
+    <Dependency Name="Microsoft.AspNetCore.App.Ref.Internal" Version="9.0.0-rc.2.24430.8">
+      <Uri>https://github.com/dotnet/aspnetcore</Uri>
+      <Sha>2b865e33f2c7c9484c28a3b62e8ff07966e23434</Sha>
+    </Dependency>
+    <Dependency Name="Microsoft.AspNetCore.App.Ref" Version="9.0.0-rc.2.24430.8">
+      <Uri>https://github.com/dotnet/aspnetcore</Uri>
+      <Sha>2b865e33f2c7c9484c28a3b62e8ff07966e23434</Sha>
+    </Dependency>
+    <Dependency Name="Microsoft.NETCore.App.Runtime.win-x64" Version="9.0.0-rc.2.24429.19">
+      <Uri>https://github.com/dotnet/runtime</Uri>
+      <Sha>d0f3235d312f7cf9683012b3fe96b2c6f20a1743</Sha>
+    </Dependency>
+    <Dependency Name="VS.Redist.Common.NetCore.SharedFramework.x64.9.0" Version="9.0.0-rc.2.24429.19">
+      <Uri>https://github.com/dotnet/runtime</Uri>
+      <Sha>d0f3235d312f7cf9683012b3fe96b2c6f20a1743</Sha>
+    </Dependency>
+    <!-- Intermediate is necessary for source build. -->
+    <Dependency Name="Microsoft.SourceBuild.Intermediate.source-build-reference-packages" Version="10.0.0-alpha.1.24428.1">
+      <Uri>https://github.com/dotnet/source-build-reference-packages</Uri>
+      <Sha>6bcf90f99d13da86c5e9753a6f34b6484673d0a0</Sha>
+      <SourceBuild RepoName="source-build-reference-packages" ManagedOnly="true" />
+    </Dependency>
+    <Dependency Name="Microsoft.CodeAnalysis" Version="4.11.0-2.24271.11">
+      <Uri>https://github.com/dotnet/roslyn</Uri>
+      <Sha>40e6b96cad11400acb5b8999057ac8ba748df940</Sha>
+    </Dependency>
+    <Dependency Name="Microsoft.CodeAnalysis.CSharp" Version="4.11.0-2.24271.11">
+      <Uri>https://github.com/dotnet/roslyn</Uri>
+      <Sha>40e6b96cad11400acb5b8999057ac8ba748df940</Sha>
+    </Dependency>
+    <Dependency Name="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0-beta1.24225.1">
+      <Uri>https://github.com/dotnet/roslyn-analyzers</Uri>
+      <Sha>8dccccec1ce3bd2fb532ec77d7e092ab9d684db7</Sha>
+    </Dependency>
+    <Dependency Name="Microsoft.CodeAnalysis.NetAnalyzers" Version="9.0.0-preview.24225.1">
+      <Uri>https://github.com/dotnet/roslyn-analyzers</Uri>
+      <Sha>8dccccec1ce3bd2fb532ec77d7e092ab9d684db7</Sha>
     </Dependency>
   </ToolsetDependencies>
 </Dependencies>

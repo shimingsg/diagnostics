@@ -1,10 +1,11 @@
-﻿<!-- Copyright (c)  Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information. -->
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>netcoreapp2.0</TargetFramework>
+    <TargetFramework>net6.0</TargetFramework>
     <IsPackable>false</IsPackable>
     <NoWarn>;1591;1701</NoWarn>
     <DefineConstants>$(DefineConstants);CORE_CLR</DefineConstants>
+    <NeedsPublishing>true</NeedsPublishing>
+    <SOSConfigFileName>$(OutputPath)$(TargetFramework)\Debugger.Tests.Common.txt</SOSConfigFileName>
   </PropertyGroup>
   
   <ItemGroup>
@@ -22,18 +23,40 @@
       <Link>Debugger.Tests.Config.txt</Link>
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
-    <Content Include="$(MSBuildThisFileDirectory)ConfigFiles\$(Configuration)\Debugger.Tests.Common.txt">
-      <Link>Debugger.Tests.Common.txt</Link>
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Win32.Primitives" Version="$(MicrosoftWin32PrimitivesVersion)" />
-    <PackageReference Include="cdb-sos" Version="$(cdbsosversion)" Condition="'$(OS)' == 'Windows_NT'" />
+    <PackageReference Include="NewtonSoft.Json" Version="$(NewtonSoftJsonVersion)" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Microsoft.Diagnostics.TestHelpers\Microsoft.Diagnostics.TestHelpers.csproj" />
+    <ProjectReference Include="$(MSBuildThisFileDirectory)..\..\Microsoft.Diagnostics.TestHelpers\Microsoft.Diagnostics.TestHelpers.csproj" />
+    <ProjectReference Include="$(MSBuildThisFileDirectory)..\..\tests\TestExtension\TestExtension.csproj" />
   </ItemGroup>
+    
+  <ItemGroup>
+    <PackageDownload Include="cdb-sos" Version="[$(cdbsosversion)]" />
+  </ItemGroup>
+
+  <Target Name="SOSWriteTestConfigFile" Outputs="$(SOSConfigFileName)" BeforeTargets="BeforeBuild;Publish">
+    <PropertyGroup>
+      <TestConfigFileLines>
+<![CDATA[
+<Configuration>
+  <TargetConfiguration>$(Configuration)</TargetConfiguration>
+  <CDBPath>$(NuGetPackageRoot)cdb-sos\$(cdbsosversion)\runtimes\win-%24(TargetArchitecture)\native\cdb.exe</CDBPath>
+</Configuration>
+]]>
+      </TestConfigFileLines>
+    </PropertyGroup>
+      
+    <WriteLinesToFile File="$(SOSConfigFileName)" Lines="$(TestConfigFileLines)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+      
+    <Message Importance="High" Text="Created config file $(SOSConfigFileName)" />
+
+    <ItemGroup>
+      <FileWrites Include="$(SOSConfigFileName)" />
+    </ItemGroup>
+  </Target>
+    
 </Project>

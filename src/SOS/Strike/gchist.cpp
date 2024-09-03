@@ -1,11 +1,10 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 // ==++==
-// 
- 
-// 
+//
+
+//
 // ==--==
 /****************************************************************************
 * STRIKE.C                                                                  *
@@ -32,10 +31,10 @@
 #include <stdint.h>
 #include <string.h>
 #include <stddef.h>
-
 #include "strike.h"
-// We need to define the target address type.  This will be used in the 
-// functions that read directly from the debuggee address space, vs. using 
+
+// We need to define the target address type.  This will be used in the
+// functions that read directly from the debuggee address space, vs. using
 // the DAC tgo read the DAC-ized data structures.
 #include "daccess.h"
 
@@ -54,15 +53,6 @@
 
 #include "util.h"
 
-#ifndef _ASSERTE
-#ifdef _DEBUG
-#define _ASSERTE(expr) \
-        do { if (!(expr) ) { ExtOut(#expr); DebugBreak(); } } while (0)
-#else // _DEBUG
-#define _ASSERTE(expr)
-#endif // _DEBUG else
-#endif // !_ASSERTE
-
 #ifdef _MSC_VER
 #pragma warning(disable:4244)   // conversion from 'unsigned int' to 'unsigned short', possible loss of data
 #pragma warning(disable:4189)   // local variable is initialized but not referenced
@@ -71,7 +61,7 @@
 struct PlugRecord
 {
     PlugRecord *next;
-    
+
     size_t PlugStart;
     size_t PlugEnd;
     size_t Delta;
@@ -82,7 +72,7 @@ struct PlugRecord
 struct PromoteRecord
 {
     PromoteRecord *next;
-    
+
     size_t Root;
     size_t Value;
     size_t methodTable;
@@ -93,7 +83,7 @@ struct PromoteRecord
 struct RelocRecord
 {
     RelocRecord *next;
-    
+
     size_t Root;
     size_t PrevValue;
     size_t NewValue;
@@ -105,14 +95,14 @@ struct RelocRecord
 struct GCRecord
 {
     ULONG64 GCCount;
-    
+
     // BOOL IsComplete() { return bFinished && bHaveStart; }
-    
+
     PlugRecord *PlugList;
     RelocRecord *RelocList;
     PromoteRecord *PromoteList;
 
-    void AddPlug(PlugRecord& p) { 
+    void AddPlug(PlugRecord& p) {
         PlugRecord *pTmp = PlugList;
         PlugList = new PlugRecord(p);
         PlugList->next = pTmp;
@@ -159,7 +149,7 @@ struct GCRecord
         }
         return ret;
     }
-    
+
     void Clear() {
 
         PlugRecord *pTrav = PlugList;
@@ -184,8 +174,8 @@ struct GCRecord
         }
 
         ZeroMemory(this,sizeof(GCRecord));
-    }        
-        
+    }
+
 };
 
 #define MAX_GCRECORDS 500
@@ -198,7 +188,7 @@ void GcHistClear()
     {
         g_records[i].Clear();
     }
-    g_recordCount = 0;    
+    g_recordCount = 0;
 }
 
 void GcHistAddLog(LPCSTR msg, StressMsg* stressMsg)
@@ -207,12 +197,12 @@ void GcHistAddLog(LPCSTR msg, StressMsg* stressMsg)
     {
         return;
     }
-    
+
     if (strcmp(msg, ThreadStressLog::gcPlugMoveMsg()) == 0)
     {
         PlugRecord pr;
         // this is a plug message
-        _ASSERTE(stressMsg->numberOfArgs == 3);
+        _ASSERTE(stressMsg->GetNumberOfArgs() == 3);
         pr.PlugStart = (size_t) stressMsg->args[0];
         pr.PlugEnd = (size_t) stressMsg->args[1];
         pr.Delta = (size_t) stressMsg->args[2];
@@ -222,18 +212,18 @@ void GcHistAddLog(LPCSTR msg, StressMsg* stressMsg)
     else if (strcmp(msg, ThreadStressLog::gcRootMsg()) == 0)
     {
         // this is a root message
-        _ASSERTE(stressMsg->numberOfArgs == 4);
+        _ASSERTE(stressMsg->GetNumberOfArgs() == 4);
         RelocRecord rr;
         rr.Root = (size_t) stressMsg->args[0];
         rr.PrevValue = (size_t) stressMsg->args[1];
         rr.NewValue = (size_t) stressMsg->args[2];
         rr.methodTable = (size_t) stressMsg->args[3];
-        g_records[g_recordCount].AddReloc(rr);        
+        g_records[g_recordCount].AddReloc(rr);
     }
     else if (strcmp(msg, ThreadStressLog::gcRootPromoteMsg()) == 0)
     {
         // this is a promote message
-        _ASSERTE(stressMsg->numberOfArgs == 3);
+        _ASSERTE(stressMsg->GetNumberOfArgs() == 3);
         PromoteRecord pr;
         pr.Root = (size_t) stressMsg->args[0];
         pr.Value = (size_t) stressMsg->args[1];
@@ -243,7 +233,7 @@ void GcHistAddLog(LPCSTR msg, StressMsg* stressMsg)
     else if (strcmp(msg, ThreadStressLog::gcStartMsg()) == 0)
     {
         // Gc start!
-        _ASSERTE(stressMsg->numberOfArgs == 3);
+        _ASSERTE(stressMsg->GetNumberOfArgs() == 3);
         ULONG64 gc_count = (ULONG64) stressMsg->args[0];
         g_records[g_recordCount].GCCount = gc_count;
         g_recordCount++;
@@ -263,7 +253,7 @@ DECLARE_API(HistStats)
     ExtOut ("%8s %8s %8s\n",
         "GCCount", "Promotes", "Relocs");
     ExtOut ("-----------------------------------\n");
-    
+
     // Just traverse the data structure, printing basic stats
     for (UINT i=0; i < g_recordCount; i++)
     {
@@ -278,15 +268,15 @@ DECLARE_API(HistStats)
     }
 
     BOOL bErrorFound = FALSE;
-    
+
     // Check for duplicate Reloc or Promote messages within one gc.
     // Method is very inefficient, improve it later.
     for (UINT i=0; i < g_recordCount; i++)
-    {       
+    {
         {   // Promotes
             PromoteRecord *Iter = g_records[i].PromoteList;
             UINT GCCount = (UINT) g_records[i].GCCount;
-            while (Iter) 
+            while (Iter)
             {
                 PromoteRecord *innerIter = Iter->next;
                 while (innerIter)
@@ -300,15 +290,15 @@ DECLARE_API(HistStats)
                     }
                     innerIter = innerIter->next;
                 }
-                
-                Iter = Iter->next;            
+
+                Iter = Iter->next;
             }
         }
 
         {   // Relocates
             RelocRecord *Iter = g_records[i].RelocList;
             UINT GCCount = (UINT) g_records[i].GCCount;
-            while (Iter) 
+            while (Iter)
             {
                 RelocRecord *innerIter = Iter->next;
                 while (innerIter)
@@ -322,17 +312,17 @@ DECLARE_API(HistStats)
                     }
                     innerIter = innerIter->next;
                 }
-                
-                Iter = Iter->next;            
+
+                Iter = Iter->next;
             }
-        }        
+        }
     }
 
     if (!bErrorFound)
     {
         ExtOut ("No duplicate promote or relocate messages found in the log.\n");
     }
-    
+
     return Status;
 }
 
@@ -342,29 +332,30 @@ DECLARE_API(HistRoot)
     size_t nArg;
 
     StringHolder rootstr;
-    CMDValue arg[] = 
+    CMDValue arg[] =
     {
         // vptr, type
         {&rootstr.data, COSTRING},
     };
 
-    if (!GetCMDOption(args, NULL, 0, arg, _countof(arg), &nArg))
-        return Status;
-
+    if (!GetCMDOption(args, NULL, 0, arg, ARRAY_SIZE(arg), &nArg))
+    { 
+        return E_INVALIDARG;
+    }
     if (nArg != 1)
     {
         ExtOut ("!Root <valid object pointer>\n");
-        return Status;
+        return E_INVALIDARG;
     }
 
     size_t Root = (size_t) GetExpression(rootstr.data);
-    
+
     ExtOut ("%8s %" POINTERSIZE "s %" POINTERSIZE "s %9s %20s\n",
         "GCCount", "Value", "MT", "Promoted?", "Notes");
     ExtOut ("---------------------------------------------------------\n");
 
     bool bBoringPeople = false;
-    
+
     // Just traverse the data structure, printing basic stats
     for (UINT i=0; i < g_recordCount; i++)
     {
@@ -413,7 +404,7 @@ DECLARE_API(HistRoot)
         if (pRelocRec != NULL)
         {
             bBoringPeople = false;
-            
+
             ExtOut ("%8d %p %p %9s ", GCCount,
                 SOS_PTR(pRelocRec->NewValue),
                 SOS_PTR(pRelocRec->methodTable),
@@ -446,8 +437,8 @@ DECLARE_API(HistRoot)
                 ExtOut ("...\n");
                 bBoringPeople = true;
             }
-        }        
-    }    
+        }
+    }
     return Status;
 }
 
@@ -457,30 +448,31 @@ DECLARE_API(HistObjFind)
     size_t nArg;
 
     StringHolder objstr;
-    CMDValue arg[] = 
+    CMDValue arg[] =
     {
         // vptr, type
         {&objstr.data, COSTRING},
     };
 
-    if (!GetCMDOption(args, NULL, 0, arg, _countof(arg), &nArg))
-        return Status;
-
+    if (!GetCMDOption(args, NULL, 0, arg, ARRAY_SIZE(arg), &nArg))
+    {
+        return E_INVALIDARG;
+    }
     if (nArg != 1)
     {
         ExtOut ("!ObjSearch <valid object pointer>\n");
-        return Status;
+        return E_INVALIDARG;
     }
 
     size_t object = (size_t) GetExpression(objstr.data);
-    
+
     ExtOut ("%8s %" POINTERSIZE "s %40s\n",
         "GCCount", "Object", "Message");
     ExtOut ("---------------------------------------------------------\n");
 
     size_t curAddress = object;
     bool bBoringPeople = false;
-    
+
     // Just traverse the data structure, printing basic stats
     for (UINT i=0; i < g_recordCount; i++)
     {
@@ -488,8 +480,8 @@ DECLARE_API(HistObjFind)
         {
             break;
         }
-        
-        UINT GCCount = (UINT) g_records[i].GCCount;        
+
+        UINT GCCount = (UINT) g_records[i].GCCount;
 
         PromoteRecord *pPtr = g_records[i].PromoteList;
         while(pPtr)
@@ -519,14 +511,14 @@ DECLARE_API(HistObjFind)
             }
             pReloc = pReloc->next;
         }
-        
+
         if (!bBoringPeople)
         {
             ExtOut ("...\n");
             bBoringPeople = true;
         }
 
-    }    
+    }
     return Status;
 }
 
@@ -536,29 +528,30 @@ DECLARE_API(HistObj)
     size_t nArg;
 
     StringHolder objstr;
-    CMDValue arg[] = 
+    CMDValue arg[] =
     {
         // vptr, type
         {&objstr.data, COSTRING},
     };
 
-    if (!GetCMDOption(args, NULL, 0, arg, _countof(arg), &nArg))
-        return Status;
-
+    if (!GetCMDOption(args, NULL, 0, arg, ARRAY_SIZE(arg), &nArg))
+    {
+        return E_INVALIDARG;
+    }
     if (nArg != 1)
     {
         ExtOut ("!object <valid object pointer>\n");
-        return Status;
+        return E_INVALIDARG;
     }
 
     size_t object = (size_t) GetExpression(objstr.data);
-    
+
     ExtOut ("%8s %" POINTERSIZE "s %40s\n",
         "GCCount", "Object", "Roots");
     ExtOut ("---------------------------------------------------------\n");
 
     size_t curAddress = object;
-    
+
     // Just traverse the data structure, printing basic stats
     for (UINT i=0; i < g_recordCount; i++)
     {
@@ -566,7 +559,7 @@ DECLARE_API(HistObj)
         {
             break;
         }
-        
+
         UINT GCCount = (UINT) g_records[i].GCCount;
 
         ExtOut ("%8d %p ", GCCount, SOS_PTR(curAddress));
@@ -593,8 +586,8 @@ DECLARE_API(HistObj)
         }
 
         ExtOut ("\n");
-        curAddress = candidateCurAddress;                
-    }    
+        curAddress = candidateCurAddress;
+    }
     return Status;
 }
 
@@ -609,10 +602,10 @@ DECLARE_API(HistInit)
     {
         ExtOut("Unable to find stress log via DAC\n");
         return E_FAIL;
-    }    
-    
+    }
+
     ExtOut ("Attempting to read Stress log\n");
-        
+
     Status = StressLog::Dump(stressLogAddr, NULL, g_ExtData);
     if (Status == S_OK)
         ExtOut("SUCCESS: GCHist structures initialized\n");
@@ -631,4 +624,3 @@ DECLARE_API(HistClear)
     ExtOut("Completed successfully.\n");
     return Status;
 }
-

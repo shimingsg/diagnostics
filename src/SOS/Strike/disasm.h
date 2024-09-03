@@ -1,6 +1,5 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 // ==++==
 // 
@@ -90,8 +89,6 @@ void DumpStackWorker (DumpStackFlag &DSFlag);
 
 void UnassemblyUnmanaged (DWORD_PTR IP, BOOL bSuppressLines);
 
-HRESULT CheckEEDll ();
-
 BOOL GetCalleeSite (DWORD_PTR IP, DWORD_PTR &IPCallee);
 
 void DisasmAndClean (DWORD_PTR &IP, __out_ecount_opt(length) char *line, ULONG length);
@@ -127,7 +124,6 @@ eTargetType GetFinalTarget(DWORD_PTR callee, DWORD_PTR* finalMDorIP);
 #ifndef THUMB_CODE
 #define THUMB_CODE 1
 #endif
-#define STACKWALK_CONTROLPC_ADJUST_OFFSET 2
 
 #ifdef SOS_TARGET_X86
 
@@ -142,6 +138,9 @@ public:
 
     ULONG GetPlatform()             const { return IMAGE_FILE_MACHINE_I386; }
     ULONG GetContextSize()          const { return sizeof(X86_CONTEXT); }
+    ULONG GetFullContextFlags()     const { return 0x0001000BL; }
+    void SetContextFlags(BYTE* context, ULONG32 contextFlags)   { ((X86_CONTEXT*)context)->ContextFlags = contextFlags; };
+
     virtual void Unassembly(
                 TADDR IPBegin, 
                 TADDR IPEnd, 
@@ -172,12 +171,13 @@ public:
     virtual void  FillTargetContext(LPVOID destCtx, LPVOID srcCtx, int idx = 0) const;
 
     virtual LPCSTR GetDumpStackHeading() const          { return s_DumpStackHeading; }
-    virtual LPCSTR GetDumpStackObjectsHeading() const   { return s_DSOHeading; }
     virtual LPCSTR GetSPName() const                    { return s_SPName; }
     virtual void GetGCRegisters(LPCSTR** regNames, unsigned int* cntRegs) const
-    { _ASSERTE(cntRegs != NULL); *regNames = s_GCRegs; *cntRegs = _countof(s_GCRegs); }
+    { _ASSERTE(cntRegs != NULL); *regNames = s_GCRegs; *cntRegs = ARRAY_SIZE(s_GCRegs); }
 
     virtual void DumpGCInfo(GCInfoToken gcInfoToken, unsigned methodSize, printfFtn gcPrintf, bool encBytes, bool bPrintHeader) const;
+
+    int StackWalkIPAdjustOffset() const { return 1; }
 
 private:
     X86Machine()  {}
@@ -187,7 +187,6 @@ private:
 
 private:
     static LPCSTR     s_DumpStackHeading;
-    static LPCSTR     s_DSOHeading;
     static LPCSTR     s_GCRegs[7];
     static LPCSTR     s_SPName;
 }; // class X86Machine
@@ -208,6 +207,9 @@ public:
 
     ULONG GetPlatform()             const { return IMAGE_FILE_MACHINE_ARMNT; }
     ULONG GetContextSize()          const { return sizeof(ARM_CONTEXT); }
+    ULONG GetFullContextFlags()     const { return 0x00200007L; }
+    void SetContextFlags(BYTE* context, ULONG32 contextFlags)   { ((ARM_CONTEXT*)context)->ContextFlags = contextFlags; };
+
     virtual void Unassembly(
                 TADDR IPBegin, 
                 TADDR IPEnd, 
@@ -239,12 +241,13 @@ public:
     virtual void  FillTargetContext(LPVOID destCtx, LPVOID srcCtx, int idx = 0) const;
 
     virtual LPCSTR GetDumpStackHeading() const          { return s_DumpStackHeading; }
-    virtual LPCSTR GetDumpStackObjectsHeading() const   { return s_DSOHeading; }
     virtual LPCSTR GetSPName() const                    { return s_SPName; }
     virtual void GetGCRegisters(LPCSTR** regNames, unsigned int* cntRegs) const
-    { _ASSERTE(cntRegs != NULL); *regNames = s_GCRegs; *cntRegs = _countof(s_GCRegs); }
+    { _ASSERTE(cntRegs != NULL); *regNames = s_GCRegs; *cntRegs = ARRAY_SIZE(s_GCRegs); }
 
     virtual void DumpGCInfo(GCInfoToken gcInfoToken, unsigned methodSize, printfFtn gcPrintf, bool encBytes, bool bPrintHeader) const;
+
+    int StackWalkIPAdjustOffset() const { return 2; }
 
 private:
     ARMMachine()  {}
@@ -254,7 +257,6 @@ private:
 
 private:
     static LPCSTR     s_DumpStackHeading;
-    static LPCSTR     s_DSOHeading;
     static LPCSTR     s_GCRegs[14];
     static LPCSTR     s_SPName;
     static ARMMachine s_ARMMachineInstance;
@@ -275,6 +277,8 @@ public:
 
     ULONG GetPlatform()             const { return IMAGE_FILE_MACHINE_AMD64; }
     ULONG GetContextSize()          const { return sizeof(AMD64_CONTEXT); }
+    ULONG GetFullContextFlags()     const { return 0x0010000BL; }
+    void SetContextFlags(BYTE* context, ULONG32 contextFlags)   { ((AMD64_CONTEXT*)context)->ContextFlags = contextFlags; };
 
     virtual void Unassembly(
                 TADDR IPBegin, 
@@ -308,12 +312,13 @@ public:
     virtual void  FillTargetContext(LPVOID destCtx, LPVOID srcCtx, int idx = 0) const;
 
     virtual LPCSTR GetDumpStackHeading() const          { return s_DumpStackHeading; }
-    virtual LPCSTR GetDumpStackObjectsHeading() const   { return s_DSOHeading; }
     virtual LPCSTR GetSPName() const                    { return s_SPName; }
     virtual void GetGCRegisters(LPCSTR** regNames, unsigned int* cntRegs) const
-    { _ASSERTE(cntRegs != NULL); *regNames = s_GCRegs; *cntRegs = _countof(s_GCRegs); }
+    { _ASSERTE(cntRegs != NULL); *regNames = s_GCRegs; *cntRegs = ARRAY_SIZE(s_GCRegs); }
 
     virtual void DumpGCInfo(GCInfoToken gcInfoToken, unsigned methodSize, printfFtn gcPrintf, bool encBytes, bool bPrintHeader) const;
+
+    int StackWalkIPAdjustOffset() const { return 1; }
 
 private:
     AMD64Machine()  {}
@@ -323,7 +328,6 @@ private:
 
 private:
     static LPCSTR       s_DumpStackHeading;
-    static LPCSTR       s_DSOHeading;
     static LPCSTR       s_GCRegs[15];
     static LPCSTR       s_SPName;
 }; // class AMD64Machine
@@ -343,6 +347,9 @@ public:
 
     ULONG GetPlatform()             const { return IMAGE_FILE_MACHINE_ARM64; }
     ULONG GetContextSize()          const { return sizeof(ARM64_CONTEXT); }
+    ULONG GetFullContextFlags()     const { return 0x00400007L; }
+    void SetContextFlags(BYTE* context, ULONG32 contextFlags)   { ((ARM64_CONTEXT*)context)->ContextFlags = contextFlags; };
+
     virtual void Unassembly(
                 TADDR IPBegin, 
                 TADDR IPEnd, 
@@ -373,12 +380,13 @@ public:
     virtual void  FillTargetContext(LPVOID destCtx, LPVOID srcCtx, int idx = 0) const;
     
     virtual LPCSTR GetDumpStackHeading() const          { return s_DumpStackHeading; }
-    virtual LPCSTR GetDumpStackObjectsHeading() const   { return s_DSOHeading; }
     virtual LPCSTR GetSPName() const                    { return s_SPName; }
     virtual void GetGCRegisters(LPCSTR** regNames, unsigned int* cntRegs) const
-    { _ASSERTE(cntRegs != NULL); *regNames = s_GCRegs; *cntRegs = _countof(s_GCRegs);}
+    { _ASSERTE(cntRegs != NULL); *regNames = s_GCRegs; *cntRegs = ARRAY_SIZE(s_GCRegs);}
 
     virtual void DumpGCInfo(GCInfoToken gcInfoToken, unsigned methodSize, printfFtn gcPrintf, bool encBytes, bool bPrintHeader) const;
+
+    int StackWalkIPAdjustOffset() const { return 4; }
 
 private:
     ARM64Machine()  {}
@@ -387,13 +395,149 @@ private:
     ARM64Machine & operator=(const ARM64Machine&);  // undefined
 
     static LPCSTR     s_DumpStackHeading;
-    static LPCSTR     s_DSOHeading;
     static LPCSTR     s_GCRegs[28];
     static LPCSTR     s_SPName;
 
 }; // class ARM64Machine
 
 #endif // SOS_TARGET_ARM64
+
+#ifdef SOS_TARGET_RISCV64
+
+/// RISCV64 Machine specific code
+class RISCV64Machine : public IMachine
+{
+public:
+    typedef RISCV64_CONTEXT TGT_CTXT;
+    
+    static IMachine* GetInstance()
+    { static RISCV64Machine s_RISCV64MachineInstance; return &s_RISCV64MachineInstance; }
+
+    ULONG GetPlatform()             const { return IMAGE_FILE_MACHINE_RISCV64; }
+    ULONG GetContextSize()          const { return sizeof(RISCV64_CONTEXT); }
+    ULONG GetFullContextFlags()     const { return 0x01000007L; }
+    void SetContextFlags(BYTE* context, ULONG32 contextFlags)   { ((RISCV64_CONTEXT*)context)->ContextFlags = contextFlags; };
+
+    virtual void Unassembly(
+                TADDR IPBegin, 
+                TADDR IPEnd, 
+                TADDR IPAskedFor, 
+                TADDR GCStressCodeCopy, 
+                GCEncodingInfo *pGCEncodingInfo, 
+                SOSEHInfo *pEHInfo,
+                BOOL bSuppressLines,
+                BOOL bDisplayOffsets,
+                std::function<void(ULONG*, UINT*, BYTE*)> displayIL) const;
+    virtual void IsReturnAddress(
+                TADDR retAddr, 
+                TADDR* whereCalled) const;
+    virtual BOOL GetExceptionContext (
+                TADDR stack, 
+                TADDR PC, 
+                TADDR *cxrAddr, 
+                CROSS_PLATFORM_CONTEXT * cxr,
+                TADDR *exrAddr, 
+                PEXCEPTION_RECORD exr) const;
+
+    // retrieve stack pointer, frame pointer, and instruction pointer from the target context
+    virtual TADDR GetSP(const CROSS_PLATFORM_CONTEXT & ctx) const  { return ctx.RiscV64Context.Sp; }
+    virtual TADDR GetBP(const CROSS_PLATFORM_CONTEXT & ctx) const  { return ctx.RiscV64Context.Fp; }
+    virtual TADDR GetIP(const CROSS_PLATFORM_CONTEXT & ctx) const  { return ctx.RiscV64Context.Pc; }
+    
+    virtual void  FillSimpleContext(StackTrace_SimpleContext * dest, LPVOID srcCtx) const;
+    virtual void  FillTargetContext(LPVOID destCtx, LPVOID srcCtx, int idx = 0) const;
+    
+    virtual LPCSTR GetDumpStackHeading() const          { return s_DumpStackHeading; }
+    virtual LPCSTR GetSPName() const                    { return s_SPName; }
+    virtual void GetGCRegisters(LPCSTR** regNames, unsigned int* cntRegs) const
+    { _ASSERTE(cntRegs != NULL); *regNames = s_GCRegs; *cntRegs = ARRAY_SIZE(s_GCRegs);}
+
+    virtual void DumpGCInfo(GCInfoToken gcInfoToken, unsigned methodSize, printfFtn gcPrintf, bool encBytes, bool bPrintHeader) const;
+
+    int StackWalkIPAdjustOffset() const { return 4; }
+
+private:
+    RISCV64Machine()  {}
+    ~RISCV64Machine() {}
+    RISCV64Machine(const RISCV64Machine& machine);      // undefined
+    RISCV64Machine & operator=(const RISCV64Machine&);  // undefined
+
+    static LPCSTR     s_DumpStackHeading;
+    static LPCSTR     s_GCRegs[30];
+    static LPCSTR     s_SPName;
+
+}; // class RISCV64Machine
+
+#endif // SOS_TARGET_RISCV64
+
+#ifdef SOS_TARGET_LOONGARCH64
+
+/// LOONGARCH64 Machine specific code
+class LOONGARCH64Machine : public IMachine
+{
+public:
+    typedef LOONGARCH64_CONTEXT TGT_CTXT;
+
+    static IMachine* GetInstance()
+    { static LOONGARCH64Machine s_LOONGARCH64MachineInstance; return &s_LOONGARCH64MachineInstance; }
+
+    ULONG GetPlatform()             const { return IMAGE_FILE_MACHINE_LOONGARCH64; }
+    ULONG GetContextSize()          const { return sizeof(LOONGARCH64_CONTEXT); }
+    ULONG GetFullContextFlags()     const { return 0x00800007L; }
+    void SetContextFlags(BYTE* context, ULONG32 contextFlags)   { ((LOONGARCH64_CONTEXT*)context)->ContextFlags = contextFlags; };
+
+    virtual void Unassembly(
+                TADDR IPBegin,
+                TADDR IPEnd,
+                TADDR IPAskedFor,
+                TADDR GCStressCodeCopy,
+                GCEncodingInfo *pGCEncodingInfo,
+                SOSEHInfo *pEHInfo,
+                BOOL bSuppressLines,
+                BOOL bDisplayOffsets,
+                std::function<void(ULONG*, UINT*, BYTE*)> displayIL) const;
+    virtual void IsReturnAddress(
+                TADDR retAddr,
+                TADDR* whereCalled) const;
+    virtual BOOL GetExceptionContext (
+                TADDR stack,
+                TADDR PC,
+                TADDR *cxrAddr,
+                CROSS_PLATFORM_CONTEXT * cxr,
+                TADDR *exrAddr,
+                PEXCEPTION_RECORD exr) const;
+
+    // retrieve stack pointer, frame pointer, and instruction pointer from the target context
+    virtual TADDR GetSP(const CROSS_PLATFORM_CONTEXT & ctx) const  { return ctx.LoongArch64Context.Sp; }
+    virtual TADDR GetBP(const CROSS_PLATFORM_CONTEXT & ctx) const  { return ctx.LoongArch64Context.Fp; }
+    virtual TADDR GetIP(const CROSS_PLATFORM_CONTEXT & ctx) const  { return ctx.LoongArch64Context.Pc; }
+
+    virtual void  FillSimpleContext(StackTrace_SimpleContext * dest, LPVOID srcCtx) const;
+    virtual void  FillTargetContext(LPVOID destCtx, LPVOID srcCtx, int idx = 0) const;
+
+    virtual LPCSTR GetDumpStackHeading() const          { return s_DumpStackHeading; }
+    virtual LPCSTR GetSPName() const                    { return s_SPName; }
+    virtual void GetGCRegisters(LPCSTR** regNames, unsigned int* cntRegs) const
+    { _ASSERTE(cntRegs != NULL); *regNames = s_GCRegs; *cntRegs = ARRAY_SIZE(s_GCRegs);}
+
+    virtual void DumpGCInfo(GCInfoToken gcInfoToken, unsigned methodSize, printfFtn gcPrintf, bool encBytes, bool bPrintHeader) const;
+
+    int StackWalkIPAdjustOffset() const { return 4; }
+
+private:
+    LOONGARCH64Machine()  {}
+    ~LOONGARCH64Machine() {}
+    LOONGARCH64Machine(const LOONGARCH64Machine& machine);      // undefined
+    LOONGARCH64Machine & operator=(const LOONGARCH64Machine&);  // undefined
+
+    static LPCSTR     s_DumpStackHeading;
+    static LPCSTR     s_GCRegs[30];
+    static LPCSTR     s_SPName;
+
+}; // class LOONGARCH64Machine
+
+#endif // SOS_TARGET_LOONGARCH64
+
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif // _MSC_VER
@@ -470,5 +614,37 @@ inline void ARM64Machine::FillTargetContext(LPVOID destCtx, LPVOID srcCtx, int i
     *dest = *(TGT_CTXT*)srcCtx;
 }
 #endif // SOS_TARGET_ARM64
+
+#ifdef SOS_TARGET_RISCV64
+inline void RISCV64Machine::FillSimpleContext(StackTrace_SimpleContext * dest, LPVOID srcCtx) const
+{
+    TGT_CTXT& src = *(TGT_CTXT*) srcCtx;
+    dest->StackOffset = src.Sp;
+    dest->FrameOffset = src.Fp;
+    dest->InstructionOffset = src.Pc;
+}
+
+inline void RISCV64Machine::FillTargetContext(LPVOID destCtx, LPVOID srcCtx, int idx /*= 0*/) const
+{
+    TGT_CTXT* dest = (TGT_CTXT*)destCtx + idx;
+    *dest = *(TGT_CTXT*)srcCtx;
+}
+#endif // SOS_TARGET_RISCV64
+
+#ifdef SOS_TARGET_LOONGARCH64
+inline void LOONGARCH64Machine::FillSimpleContext(StackTrace_SimpleContext * dest, LPVOID srcCtx) const
+{
+    TGT_CTXT& src = *(TGT_CTXT*) srcCtx;
+    dest->StackOffset = src.Sp;
+    dest->FrameOffset = src.Fp;
+    dest->InstructionOffset = src.Pc;
+}
+
+inline void LOONGARCH64Machine::FillTargetContext(LPVOID destCtx, LPVOID srcCtx, int idx /*= 0*/) const
+{
+    TGT_CTXT* dest = (TGT_CTXT*)destCtx + idx;
+    *dest = *(TGT_CTXT*)srcCtx;
+}
+#endif // SOS_TARGET_LOONGARCH64
 
 #endif // __disasm_h__

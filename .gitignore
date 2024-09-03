@@ -7,18 +7,23 @@
 *.sln.docstates
 .vs/
 *.VC.db
+.venv/
 
 # Build results
 [Aa]rtifacts/
 [Dd]ebug/
 [Rr]elease/
+!eng/[Rr]elease
 [Bb]in/
 [Oo]bj/
 [Pp]ackages/
 x64/
 .dotnet/
+.dotnet-test/
 .packages/
 .tools/
+.vscode/
+build/
 
 # Per-user project properties
 launchSettings.json
@@ -46,6 +51,9 @@ launchSettings.json
 *.pidb
 *.log
 *.scc
+
+# Visual Studio
+.vs/
 
 # Visual C++ cache files
 ipch/
@@ -121,3 +129,7 @@ StressLog.txt
 *.nettrace
 *.speedscope.json
 *.csv
+*.gcdump
+*.binlog
+*.pubxml
+**/.idea/

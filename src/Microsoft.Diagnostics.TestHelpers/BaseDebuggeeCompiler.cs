@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 using System.Collections.Generic;
@@ -26,8 +25,8 @@ namespace Microsoft.Diagnostics.TestHelpers
     /// </remarks>
     public abstract class BaseDebuggeeCompiler : IDebuggeeCompiler
     {
-        AcquireDotNetTestStep _acquireTask;
-        DotNetBuildDebuggeeTestStep _buildDebuggeeTask;
+        private readonly AcquireDotNetTestStep _acquireTask;
+        private readonly DotNetBuildDebuggeeTestStep _buildDebuggeeTask;
 
         /// <summary>
         /// Creates a new BaseDebuggeeCompiler. This compiler acquires the CLI tools and uses them to build debuggees via dotnet build.
@@ -61,13 +60,13 @@ namespace Microsoft.Diagnostics.TestHelpers
             _buildDebuggeeTask = ConfigureDotNetBuildDebuggeeTask(config, _acquireTask.LocalDotNetPath, config.CliVersion, debuggeeName);
         }
 
-        async public Task<DebuggeeConfiguration> Execute(ITestOutputHelper output)
+        public async Task<DebuggeeConfiguration> Execute(ITestOutputHelper output)
         {
             if (_acquireTask.AnyWorkToDo)
             {
-                await _acquireTask.Execute(output);
+                await _acquireTask.Execute(output).ConfigureAwait(false);
             }
-            await _buildDebuggeeTask.Execute(output);
+            await _buildDebuggeeTask.Execute(output).ConfigureAwait(false);
             return new DebuggeeConfiguration(_buildDebuggeeTask.DebuggeeProjectDirPath,
                                              _buildDebuggeeTask.DebuggeeBinaryDirPath,
                                              _buildDebuggeeTask.DebuggeeBinaryExePath ?? _buildDebuggeeTask.DebuggeeBinaryDllPath);
@@ -89,7 +88,7 @@ namespace Microsoft.Diagnostics.TestHelpers
             if (dotNetPath.EndsWith(".zip") || dotNetPath.EndsWith(".tar.gz"))
             {
                 localCliZipPath = dotNetPath;
-                string cliVersionDirName = null;
+                string cliVersionDirName;
                 if (dotNetPath.EndsWith(".tar.gz"))
                 {
                     localCliTarPath = localCliZipPath.Substring(0, dotNetPath.Length - 3);
@@ -151,7 +150,7 @@ namespace Microsoft.Diagnostics.TestHelpers
 
         protected virtual string GetDebuggeeBinaryDirPath(string debuggeeProjectDirPath, string framework, string runtime)
         {
-            string debuggeeBinaryDirPath = null;
+            string debuggeeBinaryDirPath;
             if (runtime != null)
             {
                 debuggeeBinaryDirPath = Path.Combine(debuggeeProjectDirPath, "bin", "Debug", framework, runtime);
@@ -163,32 +162,31 @@ namespace Microsoft.Diagnostics.TestHelpers
             return debuggeeBinaryDirPath;
         }
 
-        protected static string GetDebuggeeBinaryDllPath(string debuggeeBinaryDirPath, string debuggeeName)
+        protected static string GetDebuggeeBinaryDllPath(TestConfiguration config, string debuggeeBinaryDirPath, string debuggeeName)
         {
-            return Path.Combine(debuggeeBinaryDirPath, debuggeeName + ".dll");
+            return config.IsNETCore ? Path.Combine(debuggeeBinaryDirPath, debuggeeName + ".dll") : null;
         }
 
-        protected static string GetDebuggeeBinaryExePath(string debuggeeBinaryDirPath, string debuggeeName)
+        protected static string GetDebuggeeBinaryExePath(TestConfiguration config, string debuggeeBinaryDirPath, string debuggeeName)
         {
-            return Path.Combine(debuggeeBinaryDirPath, debuggeeName + ".exe");
+            return config.IsDesktop || config.PublishSingleFile ? Path.Combine(debuggeeBinaryDirPath, debuggeeName + (OS.Kind == OSKind.Windows ? ".exe" : "")) : null;
         }
 
         protected static string GetLogPath(TestConfiguration config, string framework, string runtime, string debuggeeName)
         {
-            string version = config.BuildProjectMicrosoftNetCoreAppVersion;
             return Path.Combine(GetDotNetRootBuildDirPath(config), $"{framework}-{runtime ?? "any"}-{debuggeeName}.txt");
         }
 
         protected static Dictionary<string, string> GetNugetFeeds(TestConfiguration config)
         {
-            Dictionary<string, string> nugetFeeds = new Dictionary<string, string>();
-            if(!string.IsNullOrWhiteSpace(config.NuGetPackageFeeds))
+            Dictionary<string, string> nugetFeeds = new();
+            if (!string.IsNullOrWhiteSpace(config.NuGetPackageFeeds))
             {
                 string[] feeds = config.NuGetPackageFeeds.Split(new char[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
-                foreach(string feed in feeds)
+                foreach (string feed in feeds)
                 {
                     string[] feedParts = feed.Trim().Split('=');
-                    if(feedParts.Length != 2)
+                    if (feedParts.Length != 2)
                     {
                         throw new Exception("Expected feed \'" + feed + "\' to value <key>=<value> format");
                     }

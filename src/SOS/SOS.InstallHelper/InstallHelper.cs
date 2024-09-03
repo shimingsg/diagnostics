@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 using System.Collections.Generic;
@@ -33,9 +32,14 @@ namespace SOS
         public bool EnableSymbolServer { get; set; } = true;
 
         /// <summary>
-        /// The source path from which SOS is installed. Default is OS/architecture (RID) named directory in the same directory as this assembly.
+        /// The native binaries source path from which SOS is installed. Default is OS/architecture (RID) named directory in the same directory as this assembly.
         /// </summary>
-        public string SOSSourcePath { get; set; }
+        public string SOSNativeSourcePath { get; set; }
+
+        /// <summary>
+        /// The managed binaries source path from which SOS is installed. Default is "lib" under that same directory as this assembly.
+        /// </summary>
+        public string SOSManagedSourcePath { get; set; }
 
         /// <summary>
         /// Console output delegate
@@ -52,25 +56,15 @@ namespace SOS
         {
             m_writeLine = writeLine;
             string rid = GetRid(architecture);
-            string home;
+            string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) 
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                home = Environment.GetEnvironmentVariable("USERPROFILE");
-                if (string.IsNullOrEmpty(home)) {
-                    throw new SOSInstallerException("USERPROFILE environment variable not found");
-                }
-            }
-            else
-            {
-                home = Environment.GetEnvironmentVariable("HOME");
-                if (string.IsNullOrEmpty(home)) {
-                    throw new SOSInstallerException("HOME environment variable not found");
-                }
                 LLDBInitFile = Path.Combine(home, ".lldbinit");
             }
             InstallLocation = Path.GetFullPath(Path.Combine(home, ".dotnet", "sos"));
-            SOSSourcePath = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), rid);
+            SOSNativeSourcePath = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), rid);
+            SOSManagedSourcePath = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "lib");
         }
 
         /// <summary>
@@ -79,15 +73,22 @@ namespace SOS
         /// <exception cref="SOSInstallerException">various</exception>
         public void Install()
         {
-            WriteLine("Installing SOS to {0} from {1}", InstallLocation, SOSSourcePath);
+            WriteLine("Installing SOS to {0}", InstallLocation);
 
-            if (string.IsNullOrEmpty(SOSSourcePath)) {
+            if (string.IsNullOrEmpty(SOSNativeSourcePath) || string.IsNullOrEmpty(SOSManagedSourcePath))
+            {
                 throw new SOSInstallerException("SOS source path not valid");
             }
-            if (!Directory.Exists(SOSSourcePath)) {
-                throw new SOSInstallerException($"Operating system or architecture not supported: installing from {SOSSourcePath}");
+            if (!Directory.Exists(SOSNativeSourcePath))
+            {
+                throw new SOSInstallerException($"Operating system or architecture not supported: installing from {SOSNativeSourcePath}");
             }
-            if (string.IsNullOrEmpty(InstallLocation)) {
+            if (!Directory.Exists(SOSManagedSourcePath))
+            {
+                throw new SOSInstallerException($"Invalid SOS source directory {SOSManagedSourcePath}");
+            }
+            if (string.IsNullOrEmpty(InstallLocation))
+            {
                 throw new SOSInstallerException($"Installation path {InstallLocation} not valid");
             }
 
@@ -107,22 +108,21 @@ namespace SOS
                 WriteLine("Creating installation directory...");
                 RetryOperation($"Installation path '{InstallLocation}' not valid", () => Directory.CreateDirectory(InstallLocation));
 
-                // Copy SOS files
-                WriteLine("Copying files...");
-                RetryOperation("Problem installing SOS", () =>
-                {
-                    foreach (string file in Directory.EnumerateFiles(SOSSourcePath))
-                    {
-                        string destinationFile = Path.Combine(InstallLocation, Path.GetFileName(file));
-                        File.Copy(file, destinationFile, overwrite: true);
-                    }
-                });
+                // Copy native SOS files
+                WriteLine($"Copying files from {SOSNativeSourcePath}");
+                RetryOperation("Problem installing native SOS binaries", () => CopyFiles(SOSNativeSourcePath, InstallLocation));
 
-                // Configure lldb 
-                if (LLDBInitFile != null) {
+                // Copy managed SOS files
+                WriteLine($"Copying files from {SOSManagedSourcePath}");
+                RetryOperation("Problem installing managed SOS binaries", () => CopyFiles(SOSManagedSourcePath, InstallLocation));
+
+                // Configure lldb
+                if (LLDBInitFile != null)
+                {
                     Configure();
                 }
-                else {
+                else
+                {
                     WriteLine($"Execute '.load {InstallLocation}\\sos.dll' to load SOS in your Windows debugger.");
                 }
 
@@ -177,8 +177,8 @@ namespace SOS
             }
         }
 
-        const string InitFileStart = "#START - ADDED BY SOS INSTALLER";
-        const string InitFileEnd = "#END - ADDED BY SOS INSTALLER";
+        private const string InitFileStart = "#START - ADDED BY SOS INSTALLER";
+        private const string InitFileEnd = "#END - ADDED BY SOS INSTALLER";
 
         /// <summary>
         /// Configure lldb to load SOS.
@@ -187,14 +187,15 @@ namespace SOS
         /// <exception cref="SOSInstallerException"></exception>
         public void Configure(bool remove = false)
         {
-            if (string.IsNullOrEmpty(LLDBInitFile)) {
+            if (string.IsNullOrEmpty(LLDBInitFile))
+            {
                 throw new SOSInstallerException("No lldb configuration file path");
             }
             bool changed = false;
             bool existing = false;
 
             // Remove the start/end marker from an existing .lldbinit file
-            var lines = new List<string>();
+            List<string> lines = new();
             if (File.Exists(LLDBInitFile))
             {
                 existing = true;
@@ -223,7 +224,8 @@ namespace SOS
                     }
                 }
 
-                if (markerFound) {
+                if (markerFound)
+                {
                     throw new SOSInstallerException(".lldbinit file end marker not found");
                 }
             }
@@ -236,7 +238,8 @@ namespace SOS
                 string extension = RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? ".dylib" : ".so";
                 lines.Add($"plugin load {plugin}{extension}");
 
-                if (EnableSymbolServer) {
+                if (EnableSymbolServer)
+                {
                     lines.Add(string.Format("setsymbolserver -ms"));
                 }
                 lines.Add(InitFileEnd);
@@ -246,10 +249,12 @@ namespace SOS
             // If there is anything to write, write the lldb init file
             if (changed)
             {
-                if (remove) {
+                if (remove)
+                {
                     WriteLine("Reverting {0} file - LLDB will no longer load SOS at startup", LLDBInitFile);
                 }
-                else {
+                else
+                {
                     WriteLine("{0} {1} file - LLDB will load SOS automatically at startup", existing ? "Updating existing" : "Creating new", LLDBInitFile);
                 }
                 RetryOperation($"Problem writing lldb init file {LLDBInitFile}", () => File.WriteAllLines(LLDBInitFile, lines.ToArray()));
@@ -262,7 +267,7 @@ namespace SOS
         /// <param name="errorMessage">text message or null (don't throw exception)</param>
         /// <param name="operation">callback</param>
         /// <exception cref="SOSInstallerException">errorMessage</exception>
-        private void RetryOperation(string errorMessage, Action operation)
+        private static void RetryOperation(string errorMessage, Action operation)
         {
             Exception lastfailure = null;
 
@@ -281,9 +286,10 @@ namespace SOS
                     // Sleep to allow any temporary error condition to clear up
                     System.Threading.Thread.Sleep(1000);
                 }
-                catch (Exception ex) when (ex is ArgumentException || ex is UnauthorizedAccessException || ex is SecurityException)
+                catch (Exception ex) when (ex is ArgumentException or UnauthorizedAccessException or SecurityException)
                 {
-                    if (errorMessage == null) {
+                    if (errorMessage == null)
+                    {
                         return;
                     }
                     throw new SOSInstallerException($"{errorMessage}: {ex.Message}", ex);
@@ -292,7 +298,8 @@ namespace SOS
 
             if (lastfailure != null)
             {
-                if (errorMessage == null) {
+                if (errorMessage == null)
+                {
                     return;
                 }
                 throw new SOSInstallerException($"{errorMessage}: {lastfailure.Message}", lastfailure);
@@ -325,7 +332,7 @@ namespace SOS
                         os = "linux-musl";
                     }
                 }
-                catch (Exception ex) when (ex is FileNotFoundException || ex is DirectoryNotFoundException || ex is IOException)
+                catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException or IOException)
                 {
                 }
             }
@@ -335,6 +342,21 @@ namespace SOS
             }
             string architectureString = (architecture.HasValue ? architecture : RuntimeInformation.ProcessArchitecture).ToString().ToLowerInvariant();
             return $"{os}-{architectureString}";
+        }
+
+        private static void CopyFiles(string sourcePath, string destinationPath)
+        {
+            foreach (string path in Directory.EnumerateDirectories(sourcePath))
+            {
+                string directory = Path.Combine(destinationPath, Path.GetFileName(path));
+                Directory.CreateDirectory(directory);
+                CopyFiles(path, directory);
+            }
+            foreach (string file in Directory.EnumerateFiles(sourcePath))
+            {
+                string destinationFile = Path.Combine(destinationPath, Path.GetFileName(file));
+                File.Copy(file, destinationFile, overwrite: true);
+            }
         }
 
         private void WriteLine(string format, params object[] args)

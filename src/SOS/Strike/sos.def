@@ -7,9 +7,15 @@ EXPORTS
     AnalyzeOOM
     analyzeoom=AnalyzeOOM
     ao=AnalyzeOOM
+    assemblies
+    clrmodules=assemblies
     ClrStack
     clrstack=ClrStack
     CLRStack=ClrStack
+    clrmaconfig
+    crashinfo
+    DumpALC
+    dumpalc=DumpALC
     DumpArray
     da=DumpArray
     dumparray=DumpArray
@@ -23,6 +29,11 @@ EXPORTS
     dumpdelegate=DumpDelegate
     DumpDomain
     dumpdomain=DumpDomain
+    dumpexceptions
+    DumpHttp
+    dumphttp=DumpHttp
+    DumpRequests
+    dumprequests=DumpRequests
 #ifdef TRACE_GC
     DumpGCLog
     dumpgclog=DumpGCLog
@@ -34,6 +45,8 @@ EXPORTS
     DumpGCConfigLog
     dumpgcconfiglog=DumpGCConfigLog
     dclog=DumpGCConfigLog
+    dumpgen
+    dg=dumpgen
     DumpHeap
     dumpheap=DumpHeap
     DumpIL
@@ -71,6 +84,9 @@ EXPORTS
     EHInfo
     ehinfo=EHInfo
     Ehinfo=EHInfo
+    enummem
+    ext
+    sos=ext
     FinalizeQueue
     finalizequeue=FinalizeQueue
     fq=FinalizeQueue
@@ -114,6 +130,7 @@ EXPORTS
     ListNearObj
     listnearobj=ListNearObj
     lno=ListNearObj
+    maddress
     Name2EE
     name2ee=Name2EE
     ObjSize
@@ -128,6 +145,9 @@ EXPORTS
     sethostruntime=SetHostRuntime
     SetSymbolServer
     setsymbolserver=SetSymbolServer
+    SetClrPath
+    setclrpath=SetClrPath
+    sizestats
     SOSFlush
     sosflush=SOSFlush
     StopOnException
@@ -152,6 +172,7 @@ EXPORTS
     Traverseheap=TraverseHeap
     u
     U=u
+    clru=u
     VerifyHeap
     verifyheap=VerifyHeap
     Verifyheap=VerifyHeap
@@ -203,7 +224,7 @@ EXPORTS
     gchandleleaks=GCHandleLeaks
     Gchandleleaks=GCHandleLeaks
     GCHandleleaks=GCHandleLeaks
-    HandleCLRN
+    SOSHandleCLRN
     MinidumpMode
     minidumpmode=MinidumpMode
     Minidumpmode=MinidumpMode
@@ -213,10 +234,11 @@ EXPORTS
     procinfo=ProcInfo
     SOSStatus
     sosstatus=SOSStatus
+    logging
+    runtimes
     VerifyStackTrace
     WatsonBuckets
 
-#ifdef FEATURE_CORESYSTEM
 // Only documented for Apollo internal usage
     Watch
     watch=Watch
@@ -235,6 +257,10 @@ EXPORTS
     getCodeTypeFlags=GetCodeTypeFlags
     TraceToCode
     tracetocode=TraceToCode
-#endif
+
+    CLRMACreateInstance
+    CLRMAReleaseInstance
 
     SOSInitializeByHost
+    SOSUninitializeByHost
+    InitializeHostServices

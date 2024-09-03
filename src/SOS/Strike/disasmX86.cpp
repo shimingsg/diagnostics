@@ -1,6 +1,5 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 // ==++==
 // 
@@ -12,9 +11,9 @@
 #include "disasm.h"
 #include <dbghelp.h>
 
-#include "../../../inc/corhdr.h"
-#include "../../../inc/cor.h"
-#include "../../../inc/dacprivate.h"
+#include "corhdr.h"
+#include "cor.h"
+#include "dacprivate.h"
 
 
 #if defined(SOS_TARGET_X86) && defined(SOS_TARGET_AMD64)
@@ -150,7 +149,7 @@ inline RegIndex FindReg (___in __in_z char *ptr, __out_opt int *plen = NULL, __o
 
     };
 
-    for (size_t i = 0; i < sizeof(rgRegNames)/sizeof(rgRegNames[0]); i++)
+    for (size_t i = 0; i < ARRAY_SIZE(rgRegNames); i++)
     {
         if (!strncmp(ptr, rgRegNames[i].pszName, rgRegNames[i].cchName))
         {
@@ -338,9 +337,9 @@ TADDR MDForCall (TADDR callee)
 {
     // call managed code?
     JITTypes jitType;
-    TADDR methodDesc;
-    TADDR IP = callee;
-    TADDR gcinfoAddr;
+    DWORD_PTR methodDesc;
+    DWORD_PTR IP = callee;
+    DWORD_PTR gcinfoAddr;
 
     if (!GetCalleeSite (callee, IP))
         return 0;
@@ -391,9 +390,8 @@ void HandleCall(TADDR callee, Register *reg)
 #ifdef _TARGET_AMD64_
     // A jump thunk?
 
-    CONTEXT ctx = {0};
-
-    ctx.ContextFlags = (CONTEXT_AMD64 | CONTEXT_CONTROL | CONTEXT_INTEGER);
+    CONTEXT ctx;
+    ctx.ContextFlags = (DT_CONTEXT_AMD64 | DT_CONTEXT_CONTROL | DT_CONTEXT_INTEGER);
 
     for (unsigned ireg = 0; ireg < 16; ireg++)
     {
@@ -406,7 +404,7 @@ void HandleCall(TADDR callee, Register *reg)
     ctx.Rip = callee;
 
     CLRDATA_ADDRESS ip = 0, md = 0;
-    if (S_OK == g_sos->GetJumpThunkTarget(&ctx, &ip, &md))
+    if (S_OK == g_sos->GetJumpThunkTarget((T_CONTEXT*)&ctx, &ip, &md))
     {
         if (md)
         {
@@ -578,7 +576,7 @@ void
 
         ULONG_PTR InstrAddr = IP;
 
-        DisasmAndClean (IP, line, _countof(line));
+        DisasmAndClean (IP, line, ARRAY_SIZE(line));
 
         // look at key word
         ptr = line;
@@ -606,7 +604,7 @@ void
             ULONG_PTR OrigInstrAddr = GCStressCodeCopy + (InstrAddr - IPBegin);
             ULONG_PTR OrigIP = OrigInstrAddr;
 
-            DisasmAndClean(OrigIP, line, _countof(line));
+            DisasmAndClean(OrigIP, line, ARRAY_SIZE(line));
 
             //
             // Increment the real IP based on the size of the unmodifed
@@ -756,7 +754,7 @@ void
 
 // Find the real callee site.  Handle JMP instruction.
 // Return TRUE if we get the address, FALSE if not.
-BOOL GetCalleeSite (TADDR IP, TADDR &IPCallee)
+BOOL GetCalleeSite (DWORD_PTR IP, DWORD_PTR &IPCallee)
 {
     while (TRUE) {
         unsigned char inst[2];
@@ -808,7 +806,7 @@ BOOL GetCalleeSite (TADDR IP, TADDR &IPCallee)
 
 // GetFinalTarget is based on HandleCall, but avoids printing anything to the output.
 // This is currently only called on x64
-eTargetType GetFinalTarget(TADDR callee, TADDR* finalMDorIP)
+eTargetType GetFinalTarget(DWORD_PTR callee, DWORD_PTR* finalMDorIP)
 {
     // call managed code?
     TADDR methodDesc = MDForCall (callee);
@@ -825,12 +823,12 @@ eTargetType GetFinalTarget(TADDR callee, TADDR* finalMDorIP)
 #ifdef _TARGET_AMD64_
     // A jump thunk?
 
-    CONTEXT ctx = {0};
-    ctx.ContextFlags = (CONTEXT_AMD64 | CONTEXT_CONTROL | CONTEXT_INTEGER);
+    CONTEXT ctx;
+    ctx.ContextFlags = (DT_CONTEXT_AMD64 | DT_CONTEXT_CONTROL | DT_CONTEXT_INTEGER);
     ctx.Rip = callee;
 
     CLRDATA_ADDRESS ip = 0, md = 0;
-    if (S_OK == g_sos->GetJumpThunkTarget(&ctx, &ip, &md))
+    if (S_OK == g_sos->GetJumpThunkTarget((T_CONTEXT*)&ctx, &ip, &md))
     {
         if (md)
         {
@@ -930,11 +928,10 @@ BOOL
 #ifndef FEATURE_PAL
 #ifdef SOS_TARGET_X86
     X86_CONTEXT * cxr = &pcxr->X86Context;
-    size_t contextSize = offsetof(CONTEXT, ExtendedRegisters);
 #elif defined(SOS_TARGET_AMD64)
     AMD64_CONTEXT * cxr = &pcxr->Amd64Context;
-    size_t contextSize = offsetof(CONTEXT, FltSave);
 #endif
+    size_t contextSize = GetContextSize();
 
     static TADDR IPRetAddr[4] = {0, 0, 0, 0};
 
@@ -1051,7 +1048,7 @@ void
         // on WOW64 the range valid for code is almost the whole 4GB address space
         if (g_ExtData->ReadVirtual(TO_CDADDR(*whereCalled), &addr, sizeof(addr), NULL) == S_OK)
         {
-            TADDR callee;
+            DWORD_PTR callee;
             if (GetCalleeSite(*whereCalled, callee)) {
                 *whereCalled = callee;
             }
@@ -1077,8 +1074,8 @@ void
             // on WOW64 the range valid for code is almost the whole 4GB address space
             if (g_ExtData->ReadVirtual(TO_CDADDR(*whereCalled), &addr, sizeof(addr), NULL) == S_OK) 
             {
-                TADDR callee;
-                if (GetCalleeSite(*whereCalled,callee)) {
+                DWORD_PTR callee;
+                if (GetCalleeSite(*whereCalled, callee)) {
                     *whereCalled = callee;
                 }
                 return;
@@ -1175,14 +1172,13 @@ void PrintReg (Register *reg)
 
 struct CallInfo
 {
-    DWORD_PTR stackPos;
-    DWORD_PTR retAddr;
-    DWORD_PTR whereCalled;
+    TADDR stackPos;
+    TADDR retAddr;
+    TADDR whereCalled;
 };
 
 // Search for a Return address on stack.
-BOOL GetNextRetAddr (DWORD_PTR stackBegin, DWORD_PTR stackEnd,
-                     CallInfo &callInfo)
+BOOL GetNextRetAddr (DWORD_PTR stackBegin, DWORD_PTR stackEnd, CallInfo &callInfo)
 {
     for (callInfo.stackPos = stackBegin;
          callInfo.stackPos <= stackEnd;
@@ -1212,8 +1208,7 @@ struct FrameInfo
 };
 
 // if a EBP frame, return TRUE if EBP has been setup
-void GetFrameBaseHelper (DWORD_PTR IPBegin, DWORD_PTR IPEnd,
-                         INT_PTR &StackChange)
+void GetFrameBaseHelper (DWORD_PTR IPBegin, DWORD_PTR IPEnd, INT_PTR &StackChange)
 {
     char line[256];
     char *ptr;
@@ -1629,8 +1624,8 @@ void RestoreFrameUnmanaged (Register *reg, DWORD_PTR CurIP)
         {
             NextTerm (ptr);
             // check the value on stack is a return address.
-            DWORD_PTR retAddr;
-            DWORD_PTR whereCalled;
+            TADDR retAddr;
+            TADDR whereCalled;
             move_xp (retAddr, reg[ESP].value);
             int ESPAdjustCount = 0;
             while (1)

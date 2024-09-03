@@ -1,24 +1,28 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
+//
+// sigparser.cpp
+//
 
+//
+// Signature parsing code
+//
 #ifndef FEATURE_PAL
 #include <tchar.h>
 #endif
 #include "strike.h"
 #include "util.h"
 
-#ifndef IfFailRet
+#undef IfFailRet
 #define IfFailRet(EXPR) do { HRESULT Status = (EXPR); if(FAILED(Status)) { return (Status); } } while (0)
-#endif
 
 HRESULT SigParser::SkipExactlyOne()
 {
     CorElementType typ;
     HRESULT hr = GetElemType(&typ);
-    
+
     IfFailRet(hr);
-        
+
     if (!CorIsPrimitiveType(typ))
     {
         switch ((DWORD)typ)
@@ -31,21 +35,20 @@ HRESULT SigParser::SkipExactlyOne()
             case ELEMENT_TYPE_MVAR:
                 IfFailRet(GetData(NULL));      // Skip variable number
                 break;
-/*            case ELEMENT_TYPE_VAR_ZAPSIG:
+            case ELEMENT_TYPE_VAR_ZAPSIG:
                 IfFailRet(GetData(NULL));      // Skip RID
-                break;*/
+                break;
             case ELEMENT_TYPE_OBJECT:
             case ELEMENT_TYPE_STRING:
             case ELEMENT_TYPE_TYPEDBYREF:
-/*            case ELEMENT_TYPE_CANON_ZAPSIG:*/
+            case ELEMENT_TYPE_CANON_ZAPSIG:
                 break;
 
             case ELEMENT_TYPE_BYREF: //fallthru
             case ELEMENT_TYPE_PTR:
             case ELEMENT_TYPE_PINNED:
             case ELEMENT_TYPE_SZARRAY:
-/*            case ELEMENT_TYPE_NATIVE_ARRAY_TEMPLATE_ZAPSIG:
-            case ELEMENT_TYPE_NATIVE_VALUETYPE_ZAPSIG:*/
+            case ELEMENT_TYPE_NATIVE_VALUETYPE_ZAPSIG:
                 IfFailRet(SkipExactlyOne());              // Skip referenced type
                 break;
 
@@ -54,10 +57,10 @@ HRESULT SigParser::SkipExactlyOne()
                 IfFailRet(GetToken(NULL));          // Skip RID
                 break;
 
-/*            case ELEMENT_TYPE_MODULE_ZAPSIG:
+            case ELEMENT_TYPE_MODULE_ZAPSIG:
                 IfFailRet(GetData(NULL));      // Skip index
                 IfFailRet(SkipExactlyOne());   // Skip type
-                break;*/
+                break;
 
             case ELEMENT_TYPE_FNPTR:
                 IfFailRet(SkipSignature());
@@ -66,18 +69,18 @@ HRESULT SigParser::SkipExactlyOne()
             case ELEMENT_TYPE_ARRAY:
                 {
                     IfFailRet(SkipExactlyOne());     // Skip element type
-                    ULONG rank;
+                    uint32_t rank;
                     IfFailRet(GetData(&rank));    // Get rank
                     if (rank)
                     {
-                        ULONG nsizes;
+                        uint32_t nsizes;
                         IfFailRet(GetData(&nsizes)); // Get # of sizes
                         while (nsizes--)
                         {
                             IfFailRet(GetData(NULL));           // Skip size
                         }
 
-                        ULONG nlbounds;
+                        uint32_t nlbounds;
                         IfFailRet(GetData(&nlbounds)); // Get # of lower bounds
                         while (nlbounds--)
                         {
@@ -98,7 +101,7 @@ HRESULT SigParser::SkipExactlyOne()
 
             case ELEMENT_TYPE_GENERICINST:
               IfFailRet(SkipExactlyOne());          // Skip generic type
-              ULONG argCnt;
+              uint32_t argCnt;
               IfFailRet(GetData(&argCnt)); // Get number of parameters
               while (argCnt--)
               {
@@ -113,20 +116,30 @@ HRESULT SigParser::SkipExactlyOne()
 }
 
 //---------------------------------------------------------------------------------------
-// 
+//
 // Skip only a method header signature - not the sigs of the args to the method.
-// 
-HRESULT 
+//
+HRESULT
 SigParser::SkipMethodHeaderSignature(
-    ULONG * pcArgs)
+    uint32_t * pcArgs, bool skipReturnType /*= true*/)
 {
+    CONTRACTL
+    {
+        INSTANCE_CHECK;
+        NOTHROW;
+        GC_NOTRIGGER;
+        FORBID_FAULT;
+        SUPPORTS_DAC;
+    }
+    CONTRACTL_END
+
     HRESULT hr = S_OK;
 
     // Skip calling convention
-    ULONG uCallConv;
+    uint32_t uCallConv;
     IfFailRet(GetCallingConvInfo(&uCallConv));
 
-    if ((uCallConv == IMAGE_CEE_CS_CALLCONV_FIELD) || 
+    if ((uCallConv == IMAGE_CEE_CS_CALLCONV_FIELD) ||
         (uCallConv == IMAGE_CEE_CS_CALLCONV_LOCAL_SIG))
     {
         return META_E_BAD_SIGNATURE;
@@ -139,21 +152,24 @@ SigParser::SkipMethodHeaderSignature(
     // Get arg count;
     IfFailRet(GetData(pcArgs));
 
-    // Skip return type;
-    IfFailRet(SkipExactlyOne());
+    if (skipReturnType)
+    {
+        // Skip return type;
+        IfFailRet(SkipExactlyOne());
+    }
 
     return hr;
 } // SigParser::SkipMethodHeaderSignature
 
 //---------------------------------------------------------------------------------------
-// 
+//
 // Skip a sub signature (as immediately follows an ELEMENT_TYPE_FNPTR).
 HRESULT SigParser::SkipSignature()
 {
     HRESULT hr = S_OK;
 
-    ULONG cArgs;
-    
+    uint32_t cArgs;
+
     IfFailRet(SkipMethodHeaderSignature(&cArgs));
 
     // Skip args.
